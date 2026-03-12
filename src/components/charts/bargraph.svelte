@@ -12,6 +12,7 @@
   import { scaleLinear, scaleBand, scaleLog } from "d3-scale";
   import { interpolateRgb } from "d3-interpolate";
   import type { DataEntry } from "../../data_wrangling/data_extraction";
+  import * as browser from "webextension-polyfill";
 
   // Heatmap gradient mapping sync
   interface Props {
@@ -53,6 +54,18 @@
   }: Props = $props();
 
   let matchScatterColors = $state(false);
+
+  // Load persisted color mode
+  browser.storage.local.get("bargraph_match_colors").then((result) => {
+    if (result["bargraph_match_colors"] !== undefined) {
+      matchScatterColors = result["bargraph_match_colors"];
+    }
+  });
+
+  function toggleMatchScatterColors() {
+    matchScatterColors = !matchScatterColors;
+    browser.storage.local.set({ bargraph_match_colors: matchScatterColors });
+  }
 
   // Sort
   let sortMode = $state<"original" | "ascending" | "descending">("original");
@@ -217,7 +230,7 @@
     <button
       class="bg-btn"
       class:bg-btn-on={matchScatterColors}
-      onclick={() => (matchScatterColors = !matchScatterColors)}
+      onclick={toggleMatchScatterColors}
       title="Match colors with the scatterplot"
     >
       COLOR
