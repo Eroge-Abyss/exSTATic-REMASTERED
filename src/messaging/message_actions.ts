@@ -1,7 +1,8 @@
 import * as browser from "webextension-polyfill";
+import { getLunaConnected } from "./socket_actions";
 
 interface MessageActionArgs {
-  action: "open_tab" | "download";
+  action: "open_tab" | "download" | "get_connection_status";
   url: string | Blob;
   filename?: string;
 }
@@ -11,6 +12,8 @@ export async function message_action(args: MessageActionArgs) {
     await open_tab(args.url);
   } else if (args["action"] == "download") {
     await download(args);
+  } else if (args["action"] == "get_connection_status") {
+    return { luna: getLunaConnected() };
   }
 }
 

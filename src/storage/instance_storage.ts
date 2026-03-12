@@ -231,4 +231,22 @@ export class InstanceStorage<
       await browser.storage.local.set(day_entries);
     }
   }
+
+  async getTotalCharsRead(): Promise<number> {
+    const dates_entry = await browser.storage.local.get("immersion_dates");
+    const dates: string[] = dates_entry["immersion_dates"] ?? [];
+
+    const keys = dates.map((date) =>
+      JSON.stringify([this.client, this.uuid, date]),
+    );
+
+    if (keys.length === 0) return 0;
+
+    const stats = await browser.storage.local.get(keys);
+
+    return Object.values(stats).reduce((total: number, entry: any) => {
+      return total + (entry?.chars_read ?? 0);
+    }, 0);
+  }
 }
+

@@ -18,6 +18,9 @@
     tooltip_accessors: TooltipAccessors;
     tooltip_formatters: TooltipFormatters;
     graph_title: string;
+    highlight_start?: string;
+    highlight_end?: string;
+    highlight_dates?: Set<string>;
   }
 
   let {
@@ -27,6 +30,9 @@
     tooltip_accessors,
     tooltip_formatters,
     graph_title,
+    highlight_start,
+    highlight_end,
+    highlight_dates,
   }: Props = $props();
 
   let [height, width, margin] = $state([1000, 1200, 10]);
@@ -90,8 +96,10 @@
   let mouse_out: () => void = $state(() => {});
 </script>
 
-<div class="flex h-full w-full flex-col items-center bg-slate-900 p-12">
-  <h1 class="text-4xl font-semibold text-indigo-400">{graph_title}</h1>
+<div class="flex h-full w-full flex-col items-center">
+  {#if graph_title}
+    <h1 class="mb-6 text-4xl font-semibold text-indigo-400">{graph_title}</h1>
+  {/if}
 
   <figure
     bind:clientHeight={height}
@@ -143,6 +151,9 @@
         bar_width={x_scale.bandwidth()}
         {mouse_move}
         {mouse_out}
+        {highlight_start}
+        {highlight_end}
+        {highlight_dates}
       />
     </svg>
 

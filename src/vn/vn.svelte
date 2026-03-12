@@ -20,6 +20,13 @@
   let title = $state("Game");
   let lines: string[][] = $state([]);
   let menu = $state(false);
+  let lunaConnected = $state(false);
+  let tadokuConnected = $state(false);
+
+  document.addEventListener("ws_status", (event: CustomEvent) => {
+    if (event.detail.luna !== undefined) lunaConnected = event.detail.luna;
+    if (event.detail.tadoku !== undefined) tadokuConnected = event.detail.tadoku;
+  });
 
   // Events for media being added/replaced
   document.addEventListener("media_changed", (event: CustomEvent) => {
@@ -163,8 +170,15 @@
     type="text"
     bind:value={title}
   />
-  <div class="relative">
+  <div class="flex items-center gap-3">
     <StatBar media_storage={vn_storage}>
+      <span class="ws-plug-wrap" class:connected={lunaConnected} title={lunaConnected ? "Luna: connected" : "Luna: disconnected"}>
+        <span class="material-icons ws-plug">electrical_services</span>
+      </span>
+      <span class="ws-plug-wrap" class:connected={tadokuConnected} title={tadokuConnected ? "Tadoku: connected" : "Tadoku: disconnected"}>
+        <span class="material-icons ws-plug">electrical_services</span>
+        <span class="ws-badge">多</span>
+      </span>
       <button
         class="material-icons rounded-full hover:bg-hover"
         onclick={() => (menu = !menu)}>more_vert</button
@@ -358,5 +372,32 @@
 
   .menu-label {
     @apply bg-block p-4 text-icon;
+  }
+
+  .ws-plug-wrap {
+    position: relative;
+    display: inline-flex;
+    opacity: 0.3;
+    transition: opacity 0.5s;
+  }
+
+  .ws-plug-wrap.connected {
+    opacity: 1;
+  }
+
+  .ws-plug {
+    @apply cursor-default;
+    font-size: 1.5rem;
+  }
+
+  .ws-badge {
+    position: absolute;
+    top: -2px;
+    right: -4px;
+    font-size: 0.7rem;
+    font-weight: 700;
+    font-family: system-ui, sans-serif;
+    line-height: 1;
+    opacity: 0.85;
   }
 </style>

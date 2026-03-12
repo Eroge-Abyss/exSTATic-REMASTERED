@@ -18,6 +18,8 @@
     read_speed_accessor: (d: Partial<DataEntry>) => number;
     tooltip_accessors: TooltipAccessors;
     tooltip_formatters: TooltipFormatters;
+    color_overrides?: Record<string, string>;
+    oncolorchange?: (group: string, color: string) => void;
   }
 
   let {
@@ -28,43 +30,57 @@
     read_speed_accessor,
     tooltip_accessors,
     tooltip_formatters,
+    color_overrides = {},
+    oncolorchange,
   }: Props = $props();
+
+  // Convert time from seconds to hours
+  const time_hours_accessor = (d: Partial<DataEntry>) => {
+    const seconds = time_read_accessor(d);
+    return seconds / 3600;
+  };
+
+  // Tabs
+  const tabs = [
+    { label: "Characters Read" },
+    { label: "Time Read" },
+    { label: "Reading Speed" },
+  ];
+
+  let activeTab = $state(0);
+
+  let activeAccessor = $derived(
+    activeTab === 0
+      ? chars_read_accessor
+      : activeTab === 1
+        ? time_hours_accessor
+        : read_speed_accessor,
+  );
+
+  let activeYLabel = $derived(
+    activeTab === 0
+      ? "Total Characters"
+      : activeTab === 1
+        ? "Hours"
+        : "Characters / Hour",
+  );
+
+  let activeTitle = $derived(tabs[activeTab].label);
 </script>
 
-<div class="flex h-full w-full flex-col items-center gap-20">
-  <BarGraph
-    {data}
-    x_accessor={name_accessor}
-    y_accessor={chars_read_accessor}
-    c_accessor={name_accessor}
-    {tooltip_accessors}
-    {tooltip_formatters}
-    graph_title="Reading Chars Quantity"
-    x_label="Name"
-    y_label="Chars Read"
-  />
-
-  <BarGraph
-    {data}
-    x_accessor={name_accessor}
-    y_accessor={time_read_accessor}
-    c_accessor={name_accessor}
-    {tooltip_accessors}
-    {tooltip_formatters}
-    graph_title="Reading Time Quantity"
-    x_label="Name"
-    y_label="Time Read"
-  />
-
-  <BarGraph
-    {data}
-    x_accessor={name_accessor}
-    y_accessor={read_speed_accessor}
-    c_accessor={name_accessor}
-    {tooltip_accessors}
-    {tooltip_formatters}
-    graph_title="Reading Speed Improvement"
-    x_label="Name"
-    y_label="Read Pace"
-  />
-</div>
+<BarGraph
+  {data}
+  x_accessor={name_accessor}
+  y_accessor={activeAccessor}
+  c_accessor={name_accessor}
+  {tooltip_accessors}
+  {tooltip_formatters}
+  graph_title={activeTitle}
+  x_label="Title"
+  y_label={activeYLabel}
+  {tabs}
+  {activeTab}
+  ontabchange={(i) => (activeTab = i)}
+  {color_overrides}
+  {oncolorchange}
+/>

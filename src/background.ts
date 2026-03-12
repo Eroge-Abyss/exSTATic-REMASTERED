@@ -5,6 +5,7 @@ import {
   connectionClosed,
   connectionOpened,
   dataFetched,
+  initLunaSocket,
   messagingConnected,
 } from "./messaging/socket_actions";
 
@@ -25,6 +26,7 @@ declare global {
     media_changed: CustomEvent;
     new_line: CustomEvent;
     "ttsu:page.change": CustomEvent;
+    ws_status: CustomEvent;
   }
 }
 
@@ -95,6 +97,7 @@ browser.action.onClicked.addListener(async () => {
 });
 
 let socket = new ReconnectingWebSocket("ws://localhost:9001");
+initLunaSocket(socket);
 
 socket.addEventListener("open", connectionOpened);
 socket.addEventListener("close", connectionClosed);

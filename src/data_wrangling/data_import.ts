@@ -11,7 +11,7 @@ export async function importStats(data: DataEntry[]) {
       !entry.hasOwnProperty("date") ||
       !entry.hasOwnProperty("given_identifier")
     ) {
-      return;
+      continue; // was: return — which killed the whole import on a single bad row (e.g. trailing empty CSV row)
     }
 
     const type_storage = await TypeStorage.buildTypeStorage(
@@ -58,24 +58,43 @@ export async function importStats(data: DataEntry[]) {
 }
 
 export async function importLines(data: { [key: string]: string | number }[]) {
+  // Sort by time so lines are inserted in order
+  data = data.filter((entry) => entry["uuid"] && entry["line"] !== undefined);
   data = data.sort(
     (first, second) => (first["time"] as number) - (second["time"] as number),
   );
 
+  // Group lines by UUID so we can process each game in one batch
+  const byUuid = new Map<string, { [key: string]: string | number }[]>();
   for (const entry of data) {
-    const instance_storage = await InstanceStorage.buildInstance(
-      entry["uuid"] as string,
-    );
+    const uuid = entry["uuid"] as string;
+    if (!byUuid.has(uuid)) byUuid.set(uuid, []);
+    byUuid.get(uuid)!.push(entry);
+  }
 
-    const next_line = instance_storage.details.hasOwnProperty("last_line_added")
-      ? instance_storage.details["last_line_added"] + 1
-      : 0;
+  for (const [uuid, lines] of byUuid) {
+    const instance_storage = await InstanceStorage.buildInstance(uuid);
+    const lastLineAdded = instance_storage.details["last_line_added"] ?? -1;
 
-    const line_key = JSON.stringify([entry["uuid"], next_line]);
-    const line_entry = { [line_key]: [entry["line"], entry["time"]] };
-    await instance_storage.updateDetails({
-      last_line_added: next_line,
+    // Clear existing lines for this UUID before overwriting
+    if (lastLineAdded >= 0) {
+      const existingKeys = [...Array(lastLineAdded + 1).keys()].map((i) =>
+        JSON.stringify([uuid, i]),
+      );
+      await browser.storage.local.remove(existingKeys);
+    }
+
+    // Build all new line entries in one object for a single batch write
+    const lineEntries: { [key: string]: [string, number] } = {};
+    lines.forEach((entry, index) => {
+      const line_key = JSON.stringify([uuid, index]);
+      lineEntries[line_key] = [entry["line"] as string, entry["time"] as number];
     });
-    await browser.storage.local.set(line_entry);
+
+    // Write all lines in one call, then update last_line_added once
+    await browser.storage.local.set(lineEntries);
+    await instance_storage.updateDetails({
+      last_line_added: lines.length - 1,
+    });
   }
 }

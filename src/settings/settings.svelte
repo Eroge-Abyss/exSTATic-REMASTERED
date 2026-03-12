@@ -3,8 +3,21 @@
   import type { MokuroStorage } from "../mokuro/mokuro_storage";
   import type { TTUStorage } from "../ttu/ttu_storage";
   import { VNStorage } from "../vn/vn_storage";
+  import * as browser from "webextension-polyfill";
+  import { onMount } from "svelte";
 
   let type = $state("vn");
+  let disableAnimations = $state(false);
+
+  onMount(async () => {
+    const data = await browser.storage.local.get("disable_animations");
+    disableAnimations = !!data.disable_animations;
+  });
+
+  const toggleAnimations = async () => {
+    disableAnimations = !disableAnimations;
+    await browser.storage.local.set({ disable_animations: disableAnimations });
+  };
 
   interface Props {
     vn_storage: VNStorage;
@@ -26,6 +39,7 @@
         <option value="vn">VN</option>
         <option value="mokuro">Mokuro</option>
         <option value="ttu">TTU</option>
+        <option value="global">Global Dash</option>
       </select>
     </div>
   </div>
@@ -124,6 +138,20 @@
       units="secs"
       value="120"
     />
+  {:else if type === "global"}
+    <div class="menu-label text-xl">Disable Dashboard Animations</div>
+    <div class="menu-input flex items-center justify-end p-4">
+      <button
+        class="rounded-lg px-6 py-2 font-medium transition-colors {disableAnimations
+          ? 'bg-indigo-600 text-white hover:bg-indigo-500'
+          : 'bg-slate-700 text-slate-300 hover:bg-slate-600'}"
+        onclick={toggleAnimations}
+      >
+        {disableAnimations
+          ? "ON (Animations Disabled)"
+          : "OFF (Animations Enabled)"}
+      </button>
+    </div>
   {/if}
 </div>
 

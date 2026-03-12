@@ -1,19 +1,10 @@
 <script module lang="ts">
-  export type TooltipKey = "Chars Read" | "Time Read" | "Read Speed";
+  export type TooltipKey = string;
   export type TooltipAccessors = Record<
     TooltipKey,
-    (d: Partial<DataEntry>) => number
+    (d: Partial<DataEntry>) => any
   >;
-  export type TooltipFormatters = Record<
-    TooltipKey,
-    (
-      n:
-        | number
-        | {
-            valueOf(): number;
-          },
-    ) => string
-  >;
+  export type TooltipFormatters = Record<TooltipKey, (n: any) => string>;
 </script>
 
 <script lang="ts">
@@ -85,8 +76,10 @@
 
 <div
   id="popup"
-  class="{show_popup ? 'absolute' : 'hidden'} z-50 p-3"
-  style="left: {popup_x}px;top: {popup_y}px; background-color: {popout_color}; pointer-events: none"
+  class="{show_popup
+    ? 'absolute'
+    : 'hidden'} z-50 rounded-lg p-3 text-black shadow-xl backdrop-blur-sm"
+  style="left: {popup_x}px;top: {popup_y}px; background-color: {popout_color}; border: 1px solid rgba(0,0,0,0.1); pointer-events: none;"
 >
   {#if popup_name}
     <p id="popup_title" class="font-semibold">{popup_name}</p>

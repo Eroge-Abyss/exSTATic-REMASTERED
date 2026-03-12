@@ -8,7 +8,23 @@ export class Tadoku {
     this.socket = new ReconnectingWebSocket(this.URL);
   }
 
-  send(time: number, processPath: string) {
-    this.socket.send(JSON.stringify({ time, process_path: processPath }));
+  get isConnected(): boolean {
+    return this.socket.readyState === WebSocket.OPEN;
+  }
+
+  onStatusChange(callback: (connected: boolean) => void) {
+    // Fire immediately with current state
+    callback(this.isConnected);
+    this.socket.addEventListener("open", () => callback(true));
+    this.socket.addEventListener("close", () => callback(false));
+    this.socket.addEventListener("error", () => callback(false));
+  }
+
+  send(time: number, processPath: string, charsRead?: number) {
+    const payload: Record<string, unknown> = { time, process_path: processPath };
+    if (charsRead !== undefined) {
+      payload.chars_read = charsRead;
+    }
+    this.socket.send(JSON.stringify(payload));
   }
 }

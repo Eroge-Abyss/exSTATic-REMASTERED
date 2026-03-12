@@ -3,21 +3,37 @@ import { dateNowString, timeNowSeconds } from "../calculations";
 
 import * as browser from "webextension-polyfill";
 
+import ReconnectingWebSocket from "reconnecting-websocket";
+
 export const SPLIT_PATH = /\\|\//g;
 
+let lunaSocket: ReconnectingWebSocket | null = null;
 let port: Runtime.Port | undefined;
+
+export function initLunaSocket(socket: ReconnectingWebSocket) {
+  lunaSocket = socket;
+}
+
+export function getLunaConnected() {
+  return lunaSocket?.readyState === WebSocket.OPEN;
+}
 
 export function connectionOpened() {
   console.log("Connected");
+  port?.postMessage({ luna_connected: true });
 }
 
 export function connectionClosed() {
   console.log("Connection Lost");
+  port?.postMessage({ luna_connected: false });
 }
 
 export function messagingConnected(port_: Runtime.Port) {
   console.log("Messaging Connected: ", port_);
   port = port_;
+
+  // Immediately send current Luna status when the content script connects
+  port.postMessage({ luna_connected: getLunaConnected() });
 
   port.onDisconnect.addListener(messagingDisconnected);
 }
