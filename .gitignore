@@ -143,3 +143,4 @@ build-firefox/**
 
 # Nix flake artifacts
 .direnv
+build_output.txt
