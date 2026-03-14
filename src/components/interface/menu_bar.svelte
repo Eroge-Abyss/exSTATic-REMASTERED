@@ -12,7 +12,8 @@
 </script>
 
 <div
-  class="{show ? 'grid' : 'hidden'} absolute left-0 right-0 z-50 grid-rows-2"
+  class="{show ? 'grid' : 'hidden'} absolute right-0 top-full z-50 mt-1 w-full rounded-lg shadow-xl grid-cols-1"
+  style="background: rgba(15,23,42,0.97); backdrop-filter: blur(8px); border: 1px solid rgba(129,140,248,0.15);"
 >
   {#if children}{@render children()}{:else}
     <MenuOption

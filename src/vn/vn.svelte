@@ -171,20 +171,21 @@
     bind:value={title}
   />
   <div class="flex items-center gap-3">
-    <StatBar media_storage={vn_storage}>
-      <span class="ws-plug-wrap" class:connected={lunaConnected} title={lunaConnected ? "Luna: connected" : "Luna: disconnected"}>
-        <span class="material-icons ws-plug">electrical_services</span>
-      </span>
-      <span class="ws-plug-wrap" class:connected={tadokuConnected} title={tadokuConnected ? "Tadoku: connected" : "Tadoku: disconnected"}>
-        <span class="material-icons ws-plug">electrical_services</span>
-        <span class="ws-badge">多</span>
-      </span>
-      <button
-        class="material-icons rounded-full hover:bg-hover"
-        onclick={() => (menu = !menu)}>more_vert</button
-      >
-    </StatBar>
-    <MenuBar show={menu} media_storage={vn_storage}>
+    <div class="relative">
+      <StatBar media_storage={vn_storage}>
+        <span class="ws-plug-wrap" class:connected={lunaConnected} title={lunaConnected ? "Luna: connected" : "Luna: disconnected"}>
+          <span class="material-icons ws-plug">electrical_services</span>
+        </span>
+        <span class="ws-plug-wrap" class:connected={tadokuConnected} title={tadokuConnected ? "Tadoku: connected" : "Tadoku: disconnected"}>
+          <span class="material-icons ws-plug">electrical_services</span>
+          <span class="ws-badge">多</span>
+        </span>
+        <button
+          class="material-icons rounded-full hover:bg-hover"
+          onclick={() => (menu = !menu)}>more_vert</button
+        >
+      </StatBar>
+      <MenuBar show={menu} media_storage={vn_storage}>
       <MenuOption
         media_storage={vn_storage}
         id="font"
@@ -281,6 +282,7 @@
         >View Stats</button
       >
     </MenuBar>
+    </div>
   </div>
   <button
     id="delete-selection"
