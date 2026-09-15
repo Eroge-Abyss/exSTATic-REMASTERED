@@ -11,6 +11,9 @@
 
   import { parse } from "papaparse";
   import type { DataEntry } from "../data_wrangling/data_extraction";
+  import { applyTheme } from "../themes/apply_theme";
+
+  applyTheme();
 
   interface Props {
     vn_storage: VNStorage;
@@ -33,8 +36,9 @@
     // Show name and title
     title = event.detail["name"];
 
-    // Show lines
-    lines = event.detail["lines"].sort(
+    // getLines() returns undefined for a game with no captured lines yet
+    // (last_line_added === 0). Guard with ?? [] so .sort() never throws.
+    lines = (event.detail["lines"] ?? []).sort(
       (
         first: [string, number, string, number],
         second: [string, number, string, number],
@@ -344,7 +348,7 @@
   }
 
   .delete-button {
-    @apply inline-flex self-center rounded-full border-indigo-500 p-2 text-button-text hover:bg-hover hover:text-icon;
+    @apply inline-flex self-center rounded-full p-2 text-button-text hover:bg-hover hover:text-icon;
   }
 
   .line-select {
@@ -360,8 +364,12 @@
   }
 
   .menu-bar {
-    @apply flex h-full items-center gap-3 bg-button bg-opacity-70 p-3 hover:bg-opacity-80 hover:filter-none;
+    @apply flex h-full items-center gap-3 p-3 hover:filter-none;
+    background: color-mix(in srgb, var(--exs-accent) 70%, transparent);
     filter: blur(var(--default-menu-blur));
+  }
+  .menu-bar:hover {
+    background: color-mix(in srgb, var(--exs-accent) 85%, transparent);
   }
 
   .menu-button {

@@ -12,7 +12,7 @@
 </script>
 
 <div
-  class="{show ? 'grid' : 'hidden'} absolute right-0 top-full z-50 mt-1 w-full rounded-lg shadow-xl grid-cols-1"
+  class="{show ? 'grid' : 'hidden'} menu-scroll absolute right-0 top-full z-50 mt-1 w-full max-h-[75vh] overflow-y-auto rounded-lg shadow-xl grid-cols-1"
   style="background: rgba(15,23,42,0.97); backdrop-filter: blur(8px); border: 1px solid rgba(129,140,248,0.15);"
 >
   {#if children}{@render children()}{:else}
@@ -40,3 +40,23 @@
     />
   {/if}
 </div>
+
+<style>
+  .menu-scroll {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(129, 140, 248, 0.4) transparent;
+  }
+  .menu-scroll::-webkit-scrollbar {
+    width: 6px;
+  }
+  .menu-scroll::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .menu-scroll::-webkit-scrollbar-thumb {
+    background-color: rgba(129, 140, 248, 0.4);
+    border-radius: 9999px;
+  }
+  .menu-scroll::-webkit-scrollbar-thumb:hover {
+    background-color: rgba(129, 140, 248, 0.7);
+  }
+</style>

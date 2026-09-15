@@ -74,6 +74,9 @@ export class MediaStorage<TDetails extends InstanceDetails = InstanceDetails> {
       return;
     }
 
+    // Flush any buffered stats for the outgoing game before we swap instances.
+    await this.instance_storage?.flushPendingStats();
+
     // Ensure the previous UUID is correctly set
     if (this.properties["previous_uuid"] != new_uuid) {
       this.type_storage.updateProperties({ previous_uuid: new_uuid });
@@ -115,6 +118,9 @@ export class MediaStorage<TDetails extends InstanceDetails = InstanceDetails> {
   stop_ticker(event = true) {
     this.previous_time = undefined;
 
+    // Persist any buffered stat deltas before going idle.
+    this.instance_storage?.flushPendingStats();
+
     if (event) {
       const event = new Event("status_inactive");
       document.dispatchEvent(event);
@@ -142,6 +148,8 @@ export class MediaStorage<TDetails extends InstanceDetails = InstanceDetails> {
         time_read: time_between_ticks,
       });
       this.start_ticker();
+      // Flush all buffered deltas (chars, lines, time) in one write per second.
+      await this.instance_storage.flushPendingStats();
     } else {
       this.stop_ticker();
     }

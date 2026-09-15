@@ -5,11 +5,15 @@
   import { VNStorage } from "../vn/vn_storage";
   import * as browser from "webextension-polyfill";
   import { onMount } from "svelte";
+  import { applyTheme, setTheme } from "../themes/apply_theme";
+  import type { ThemeId } from "../themes/themes";
 
   let type = $state("vn");
   let disableAnimations = $state(false);
+  let currentTheme = $state<ThemeId>("dark");
 
   onMount(async () => {
+    currentTheme = await applyTheme();
     const data = await browser.storage.local.get("disable_animations");
     disableAnimations = !!data.disable_animations;
   });
@@ -17,6 +21,11 @@
   const toggleAnimations = async () => {
     disableAnimations = !disableAnimations;
     await browser.storage.local.set({ disable_animations: disableAnimations });
+  };
+
+  const handleThemeChange = async (newTheme: ThemeId) => {
+    currentTheme = newTheme;
+    await setTheme(newTheme);
   };
 
   interface Props {
@@ -31,11 +40,11 @@
 <div class="flex flex-col gap-10 px-20">
   <div
     id="top_bar"
-    class="sticky top-0 z-50 flex h-20 justify-center bg-button bg-opacity-80"
+    class="sticky top-0 z-50 flex h-20 justify-center"
   >
     <div class="flex flex-row place-items-center gap-3">
       <p class="header-text">Settings</p>
-      <select class="bg-button" bind:value={type}>
+      <select class="bg-button text-white rounded px-2 py-1 font-medium outline-none" bind:value={type}>
         <option value="vn">VN</option>
         <option value="mokuro">Mokuro</option>
         <option value="ttu">TTU</option>
@@ -139,12 +148,43 @@
       value="120"
     />
   {:else if type === "global"}
+    <div class="menu-label text-xl">Theme</div>
+    <div class="menu-input flex items-center justify-end gap-3 p-4">
+      <button
+        class="flex items-center gap-2 rounded-lg px-4 py-2 font-medium transition-all {currentTheme === 'dark'
+          ? 'bg-button text-white ring-2 ring-white/50'
+          : 'bg-backdrop text-text hover:text-white'}"
+        onclick={() => handleThemeChange("dark")}
+      >
+        <span class="inline-block h-3.5 w-3.5 rounded-full bg-slate-900 border border-slate-500"></span>
+        Dark
+      </button>
+      <button
+        class="flex items-center gap-2 rounded-lg px-4 py-2 font-medium transition-all {currentTheme === 'white'
+          ? 'bg-button text-white ring-2 ring-indigo-500/50'
+          : 'bg-backdrop text-text hover:text-white'}"
+        onclick={() => handleThemeChange("white")}
+      >
+        <span class="inline-block h-3.5 w-3.5 rounded-full bg-white border border-slate-300"></span>
+        White
+      </button>
+      <button
+        class="flex items-center gap-2 rounded-lg px-4 py-2 font-medium transition-all {currentTheme === 'black'
+          ? 'bg-button text-white ring-2 ring-zinc-500/50'
+          : 'bg-backdrop text-text hover:text-white'}"
+        onclick={() => handleThemeChange("black")}
+      >
+        <span class="inline-block h-3.5 w-3.5 rounded-full border border-zinc-700" style="background-color: #070614;"></span>
+        Black
+      </button>
+    </div>
+
     <div class="menu-label text-xl">Disable Dashboard Animations</div>
     <div class="menu-input flex items-center justify-end p-4">
       <button
         class="rounded-lg px-6 py-2 font-medium transition-colors {disableAnimations
-          ? 'bg-indigo-600 text-white hover:bg-indigo-500'
-          : 'bg-slate-700 text-slate-300 hover:bg-slate-600'}"
+          ? 'bg-button text-white hover:bg-hover'
+          : 'bg-backdrop text-text hover:opacity-80'}"
         onclick={toggleAnimations}
       >
         {disableAnimations
@@ -161,22 +201,33 @@
   @tailwind utilities;
 
   body {
-    @apply bg-slate-800;
+    background: var(--exs-backdrop, #1e293b);
+    color: var(--exs-text, #94a3b8);
+  }
+
+  #top_bar {
+    background: color-mix(in srgb, var(--exs-backdrop) 85%, transparent);
+    backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--exs-border, transparent);
   }
 
   .menu-input {
     @apply col-start-2 grow bg-menu p-1 text-menu-text;
+    border: 1px solid var(--exs-border, transparent);
   }
 
   .menu-label {
     @apply bg-block p-4 text-icon;
+    border: 1px solid var(--exs-border, transparent);
   }
 
   .header-text {
     @apply inline-flex items-center text-4xl;
+    color: var(--exs-title, #818cf8);
   }
 
   .header-icon {
-    @apply h-full hover:bg-hover hover:hover:text-icon;
+    @apply h-full cursor-pointer hover:bg-hover hover:text-icon;
+    color: var(--exs-title, #818cf8);
   }
 </style>

@@ -6,16 +6,17 @@ module.exports = {
     theme: {
       extend: {
         colors: {
-          backdrop: colors.slate[800],
-          block: colors.slate[900],
-          title: colors.indigo[400],
-          text: colors.slate[400],
-          "button-text": colors.indigo[500],
-          icon: colors.white,
-          menu: colors.slate[700],
-          "menu-text": colors.gray[300],
-          button: colors.indigo[400],
-          hover: colors.indigo[700]
+          backdrop: "var(--exs-backdrop)",
+          block: "var(--exs-block)",
+          surface: "var(--exs-surface)",
+          title: "var(--exs-title)",
+          text: "var(--exs-text)",
+          "button-text": "var(--exs-accent-dim)",
+          icon: "var(--exs-icon)",
+          menu: "var(--exs-menu-bg)",
+          "menu-text": "var(--exs-menu-text)",
+          button: "var(--exs-accent)",
+          hover: "var(--exs-accent-hover)"
         }
       }
     },

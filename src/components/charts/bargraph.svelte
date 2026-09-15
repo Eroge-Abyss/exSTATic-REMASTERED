@@ -32,6 +32,12 @@
     mouse_out?: () => void;
     color_overrides?: Record<string, string>;
     oncolorchange?: (group: string, color: string) => void;
+    /** Fired on right-click of a bar with the game name and screen position. */
+    onbarcontextmenu?: (name: string, x: number, y: number) => void;
+    /** Number of currently hidden games — shows a reset button when > 0. */
+    hiddenCount?: number;
+    /** Called when the reset-visibility button is clicked. */
+    onresetvisibility?: () => void;
   }
 
   let {
@@ -51,6 +57,9 @@
     mouse_out = $bindable(() => {}),
     color_overrides = {},
     oncolorchange,
+    onbarcontextmenu,
+    hiddenCount = 0,
+    onresetvisibility,
   }: Props = $props();
 
   let matchScatterColors = $state(false);
@@ -227,6 +236,15 @@
 
   <!-- Controls (top left) -->
   <div class="bg-controls-left">
+    {#if hiddenCount > 0}
+      <button
+        class="bg-btn"
+        onclick={onresetvisibility}
+        title="Show all {hiddenCount} hidden game{hiddenCount !== 1 ? 's' : ''}"
+      >
+        ↺ <span class="bg-reset-badge">{hiddenCount}</span>
+      </button>
+    {/if}
     <button
       class="bg-btn"
       class:bg-btn-on={matchScatterColors}
@@ -279,7 +297,7 @@
           x2={safeWidth - marginRight}
           y1={y_scale(tick)}
           y2={y_scale(tick)}
-          stroke="#818cf8"
+          stroke="var(--exs-accent, #818cf8)"
           stroke-opacity="0.15"
           stroke-dasharray="4,4"
         />
@@ -338,6 +356,10 @@
               class="cursor-pointer"
               onmousemove={hitZoneMove}
               onmouseout={hitZoneOut}
+              oncontextmenu={(e) => {
+                e.preventDefault();
+                onbarcontextmenu?.(x_accessor(d), e.clientX, e.clientY);
+              }}
               style="transition: opacity 0.2s ease;"
             />
 
@@ -373,17 +395,19 @@
 
 <style>
   .bg-wrap {
-    background: #0f172a;
+    background: var(--exs-chart-bg, #0f172a);
+    border: 1px solid var(--exs-border, transparent);
     border-radius: 12px;
     padding: 18px 16px 10px;
     width: 100%;
     position: relative;
+    box-shadow: var(--exs-section-shadow, none);
   }
   .bg-title {
     text-align: center;
     font-size: 1.3rem;
     font-weight: 700;
-    color: #818cf8;
+    color: var(--exs-title, #818cf8);
     margin: 0;
     background: transparent;
     padding: 0;
@@ -392,7 +416,7 @@
   .bg-subtitle {
     text-align: center;
     font-size: 0.72rem;
-    color: #818cf8;
+    color: var(--exs-text-muted, #818cf8);
     margin: 2px 0 4px;
     letter-spacing: 0.02em;
     font-family: "Outfit", sans-serif;
@@ -417,7 +441,7 @@
     border: none;
     border-radius: 8px;
     padding: 5px 12px;
-    color: #818cf8;
+    color: var(--exs-accent, #818cf8);
     font-size: 0.8rem;
     font-family: inherit;
     font-weight: 400;
@@ -426,12 +450,25 @@
     letter-spacing: 0.01em;
   }
   .bg-btn:hover {
-    color: #fff;
+    color: var(--exs-text-strong, #fff);
   }
   :global(.bg-btn-on) {
-    background: #818cf8 !important;
+    background: var(--exs-accent, #818cf8) !important;
     color: #fff !important;
     font-weight: 500 !important;
+  }
+  .bg-reset-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 1.1rem;
+    height: 1.1rem;
+    font-size: 0.6rem;
+    font-weight: 700;
+    border-radius: 9999px;
+    background: rgba(129, 140, 248, 0.25);
+    padding: 0 0.2rem;
+    line-height: 1;
   }
   .bg-figure {
     position: relative;
@@ -456,7 +493,7 @@
     border: none;
     border-radius: 8px;
     padding: 8px 20px;
-    color: #818cf8;
+    color: var(--exs-accent, #818cf8);
     font-size: 0.8rem;
     font-family: inherit;
     font-weight: 400;
@@ -465,10 +502,10 @@
     letter-spacing: 0.01em;
   }
   .bg-tab:hover {
-    color: #fff;
+    color: var(--exs-text-strong, #fff);
   }
   :global(.bg-tab-active) {
-    background: #818cf8 !important;
+    background: var(--exs-accent, #818cf8) !important;
     color: #fff !important;
     font-weight: 500 !important;
   }

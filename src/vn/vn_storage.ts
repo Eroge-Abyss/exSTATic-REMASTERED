@@ -1,4 +1,4 @@
-import * as browser from "webextension-polyfill";
+
 import { charsInLine, dateNowString, lineSplitCount } from "../calculations";
 import type { InstanceStorage, Stat } from "../storage/instance_storage";
 import { MediaStorage } from "../storage/media_storage";
@@ -12,6 +12,8 @@ import type { TypeStorage } from "../storage/type_storage";
 
 export class VNStorage extends MediaStorage {
   max_lines: number;
+  /** In-memory dedup cache — replaces the per-line storage.get read. */
+  #lastLineText: string | undefined;
 
   constructor(
     type_storage: TypeStorage,
@@ -33,6 +35,10 @@ export class VNStorage extends MediaStorage {
   }
 
   async logLines() {
+    // Reset dedup cache on game switch — first line of a new game must
+    // never be skipped because it matched the last line of the previous game.
+    this.#lastLineText = undefined;
+
     if (!this.uuid || !this.details || !this.instance_storage) return;
 
     const event = new CustomEvent("media_changed", {
@@ -46,37 +52,47 @@ export class VNStorage extends MediaStorage {
   }
 
   async addLine(line: string, date: string, time: number) {
-    const previous_line_key = JSON.stringify([
-      this.uuid,
-      this.details!.last_line_added,
-    ]);
-    const previous_line = (await browser.storage.local.get(previous_line_key))[
-      previous_line_key
-    ];
+    // In-memory dedup — replaces a storage.get read (~50-100ms) per line.
+    if (line === this.#lastLineText) return;
 
-    if (previous_line == undefined || line != previous_line[0]) {
-      const chars_in_line = charsInLine(line);
-      if (chars_in_line === 0) return;
+    const chars_in_line = charsInLine(line);
+    if (chars_in_line === 0) return;
 
-      this.start_ticker(false);
+    // Mark as accepted before writes so rapid re-sends of the same text
+    // don't pass the dedup check while insertLine is in-flight.
+    this.#lastLineText = line;
+    this.start_ticker(false);
 
-      await this.instance_storage?.insertLine(line, time);
+    // Dispatch before insertLine — text appears at ~0ms perceived delay.
+    // insertLine + stat writes complete silently in the background.
+    document.dispatchEvent(new CustomEvent("new_line", {
+      detail: {
+        line_id: this.details!.last_line_added + 1,
+        line: line,
+        time: time,
+      },
+    }));
 
-      await this.instance_storage?.addToDates(date);
-      await this.instance_storage?.addToDate(date);
-      await this.instance_storage?.addDailyStats(date, {
-        lines_read: lineSplitCount(line),
-        chars_read: chars_in_line,
-      });
+    await this.instance_storage?.insertLine(line, time);
 
-      const event = new CustomEvent("new_line", {
-        detail: {
-          line_id: this.details!.last_line_added,
-          line: line,
-          time: time,
-        },
-      });
-      document.dispatchEvent(event);
+    // If any of the subsequent writes fail (e.g. storage quota exceeded) we
+    // roll back the line we just inserted so that lines and stats stay in sync.
+    const insertedLineId = this.details!.last_line_added;
+    try {
+      // All three writes target different storage keys — run in parallel.
+      await Promise.all([
+        this.instance_storage?.addToDates(date),
+        this.instance_storage?.addToDate(date),
+        this.instance_storage?.addDailyStats(date, {
+          lines_read: lineSplitCount(line),
+          chars_read: chars_in_line,
+        }),
+      ]);
+    } catch (e) {
+      // Remove the orphaned line entry; last_line_added gap is harmless
+      // (getLines skips missing keys).
+      await this.instance_storage?.deleteLine(insertedLineId);
+      throw e;
     }
   }
 

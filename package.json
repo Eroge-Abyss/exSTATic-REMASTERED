@@ -4,6 +4,8 @@
     "build:prod": "node esbuild.prod.mjs",
     "web-ext-chrome": "web-ext --source-dir build-chrome --artifacts-dir web-ext-chrome",
     "web-ext-firefox": "web-ext --source-dir build-firefox --artifacts-dir web-ext-firefox",
+    "release:chrome": "node esbuild.prod.mjs chrome && web-ext --source-dir build-chrome --artifacts-dir web-ext-chrome build",
+    "release:firefox": "node esbuild.prod.mjs firefox && web-ext --source-dir build-firefox --artifacts-dir web-ext-firefox build",
     "format": "npx prettier --write src"
   },
   "dependencies": {

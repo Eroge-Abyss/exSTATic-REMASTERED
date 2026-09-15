@@ -386,24 +386,26 @@
 
 <style>
   .sp-wrap {
-    background: #0f172a;
+    background: var(--exs-chart-bg, #0f172a);
+    border: 1px solid var(--exs-border, transparent);
     border-radius: 12px;
     padding: 18px 16px 10px;
     width: 100%;
     position: relative;
+    box-shadow: var(--exs-section-shadow, none);
   }
   .sp-title {
     text-align: center;
     font-size: 1.3rem;
     font-weight: 700;
-    color: #818cf8;
-    text-shadow: 0 0 12px rgba(129, 140, 248, 0.4);
+    color: var(--exs-title, #818cf8);
+    text-shadow: 0 0 12px rgba(129, 140, 248, 0.2);
     margin: 0;
   }
   .sp-subtitle {
     text-align: center;
     font-size: 0.72rem;
-    color: #818cf8;
+    color: var(--exs-text-muted, #818cf8);
     margin: 2px 0 4px;
     letter-spacing: 0.02em;
     font-family: "Outfit", sans-serif;
@@ -421,7 +423,7 @@
     border: none;
     border-radius: 8px;
     padding: 5px 12px;
-    color: #818cf8;
+    color: var(--exs-accent, #818cf8);
     font-size: 0.8rem;
     font-family: inherit;
     font-weight: 400;
@@ -430,10 +432,10 @@
     letter-spacing: 0.01em;
   }
   .sp-btn:hover {
-    color: #fff;
+    color: var(--exs-text-strong, #fff);
   }
   :global(.sp-btn-on) {
-    background: #818cf8 !important;
+    background: var(--exs-accent, #818cf8) !important;
     color: #fff !important;
     font-weight: 500 !important;
     box-shadow: 0 0 16px rgba(129, 140, 248, 0.4) !important;
@@ -460,7 +462,7 @@
     border: none;
     border-radius: 8px;
     padding: 8px 20px;
-    color: #818cf8;
+    color: var(--exs-accent, #818cf8);
     font-size: 0.8rem;
     font-family: inherit;
     font-weight: 400;
@@ -469,10 +471,10 @@
     letter-spacing: 0.01em;
   }
   .sp-tab:hover {
-    color: #fff;
+    color: var(--exs-text-strong, #fff);
   }
   :global(.sp-tab-active) {
-    background: #818cf8 !important;
+    background: var(--exs-accent, #818cf8) !important;
     color: #fff !important;
     font-weight: 500 !important;
     box-shadow: 0 0 16px rgba(129, 140, 248, 0.4) !important;

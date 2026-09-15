@@ -14,6 +14,8 @@
     highlight_end?: string;
     highlight_dates?: Set<string>;
     hovered_index?: number | null;
+    onclick?: (d: Partial<DataEntry>) => void;
+    oncontextmenu?: (d: Partial<DataEntry>, event: MouseEvent) => void;
   }
 
   let {
@@ -29,6 +31,8 @@
     highlight_end,
     highlight_dates,
     hovered_index = null,
+    onclick,
+    oncontextmenu,
   }: Props = $props();
 
   let ready: boolean = $derived(
@@ -76,6 +80,8 @@
 <!-- svelte-ignore a11y_mouse_events_have_key_events -->
 {#if ready}
   {#each data as d, i}
+    <!-- svelte-ignore a11y_click_events_have_key_events -->
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
     <rect
       data-index={i}
       x={xGet(d)}
@@ -91,7 +97,14 @@
       aria-roledescription="bar"
       onmousemove={mouse_move}
       onmouseout={mouse_out}
-      style="transition: x 0.5s cubic-bezier(0.2, 0.8, 0.2, 1), y 0.5s cubic-bezier(0.2, 0.8, 0.2, 1), height 0.5s cubic-bezier(0.2, 0.8, 0.2, 1), width 0.5s cubic-bezier(0.2, 0.8, 0.2, 1), fill 0.5s ease, fill-opacity 0.15s ease;"
+      onclick={() => onclick && onclick(d)}
+      oncontextmenu={(e) => {
+        if (oncontextmenu) {
+          e.preventDefault();
+          oncontextmenu(d, e);
+        }
+      }}
+      style="transition: x 0.5s cubic-bezier(0.2, 0.8, 0.2, 1), y 0.5s cubic-bezier(0.2, 0.8, 0.2, 1), height 0.5s cubic-bezier(0.2, 0.8, 0.2, 1), width 0.5s cubic-bezier(0.2, 0.8, 0.2, 1), fill 0.5s ease, fill-opacity 0.15s ease; cursor: pointer;"
     />
   {/each}
 {/if}

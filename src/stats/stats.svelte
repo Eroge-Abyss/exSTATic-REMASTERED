@@ -2,12 +2,15 @@
   import BulkDataGraphs from "./bulk_data_graphs.svelte";
   import MediaGraphs from "./media_graphs.svelte";
   import CalendarHeatmap from "../components/charts/calendar_heatmap.svelte";
-  import { fade } from "svelte/transition";
+  import ContextMenu from "../components/interface/context_menu.svelte";
+  import { fade, slide } from "svelte/transition";
   import { tweened } from "svelte/motion";
   import { cubicOut } from "svelte/easing";
 
   import { group, groups, sum, min, max } from "d3-array";
   import { format } from "d3-format";
+  import { line, area, curveMonotoneX } from "d3-shape";
+  import { scalePoint, scaleLinear } from "d3-scale";
   import {
     differenceInDays,
     isSameMonth,
@@ -24,22 +27,43 @@
     format as formatDate,
     parseISO,
     startOfYear,
+    endOfYear,
+    startOfMonth,
+    endOfMonth,
+    startOfWeek,
+    eachDayOfInterval,
+    eachWeekOfInterval,
+    eachMonthOfInterval,
     getYear,
   } from "date-fns";
   import {
     getData,
+    getAllInstances,
     softDeleteGame,
     restoreGame,
     getDeletedGames,
     permanentDeleteGame,
     renameGame,
+    getDuplicateGroups,
+    mergeGames,
+    undoMerge,
+    getMergeHistory,
+    upsertManualStat,
+    restoreManualStats,
+    createManualTitle,
+    repairDateStats,
     type DataEntry,
+    type StatSnapshot,
+    type MergeSnapshot,
   } from "../data_wrangling/data_extraction";
   import type {
     TooltipAccessors,
     TooltipFormatters,
   } from "../components/charts/popup.svelte";
   import * as browser from "webextension-polyfill";
+  import { applyTheme } from "../themes/apply_theme";
+
+  applyTheme();
 
   const SECS_TO_HRS = 60 * 60;
 
@@ -55,11 +79,244 @@
     { uuid: string; name: string; type: string; deleted_at: string }[]
   >([]);
 
+  // Refresh data in real time when storage changes
+  let refreshTimer: ReturnType<typeof setTimeout> | undefined;
+  browser.storage.onChanged.addListener(() => {
+    clearTimeout(refreshTimer);
+    refreshTimer = setTimeout(async () => {
+      const fresh = await getData();
+      if (fresh) {
+        data = fresh.sort(
+          (a, b) => parseISO(a["date"]).valueOf() - parseISO(b["date"]).valueOf()
+        );
+      }
+    }, 300);
+  });
+
   // Load deleted games on init
   async function loadDeletedGames() {
     deletedGames = await getDeletedGames();
   }
   loadDeletedGames();
+
+  // All tracked instances (including those with no stats yet)
+  let allInstances = $state<{ uuid: string; name: string; type: string }[]>([]);
+  async function loadAllInstances() {
+    allInstances = await getAllInstances();
+  }
+  loadAllInstances();
+
+  // Duplicate detection
+  let duplicateGroups = $state<{ name: string; uuids: string[] }[]>([]);
+  let showDuplicates = $state(false);
+  let mergingGroup = $state<string | null>(null);
+
+  async function loadDuplicates() {
+    duplicateGroups = await getDuplicateGroups();
+  }
+  loadDuplicates();
+
+  async function handleMerge(group: { name: string; uuids: string[] }) {
+    const confirmed = confirm(
+      `Merge all ${group.uuids.length} entries for "${group.name}" into one?\nThis combines stats and lines. Use the Merge History panel to undo if needed.`
+    );
+    if (!confirmed) return;
+    mergingGroup = group.name;
+    // Merge all into the first UUID sequentially
+    const [primary, ...rest] = group.uuids;
+    for (const secondary of rest) {
+      await mergeGames(primary, secondary);
+    }
+    mergingGroup = null;
+    await refreshData();
+    await loadDuplicates();
+    await loadMergeHistory();
+  }
+
+  // ---- Merge History / Undo ----
+  let mergeHistory = $state<MergeSnapshot[]>([]);
+  let undoingMerge = $state<string | null>(null);
+
+  async function loadMergeHistory() {
+    mergeHistory = await getMergeHistory();
+  }
+  loadMergeHistory();
+
+  async function handleUndoMerge(snapshot: MergeSnapshot) {
+    const confirmed = confirm(
+      `Undo merge of "${snapshot.secondaryName}" into "${snapshot.primaryName}"?\nThis will restore both games to their pre-merge state.`
+    );
+    if (!confirmed) return;
+    undoingMerge = snapshot.timestamp;
+    await undoMerge(snapshot);
+    undoingMerge = null;
+    await refreshData();
+    await loadDuplicates();
+    await loadMergeHistory();
+  }
+
+  // ---- Period Tab Definitions & State ----
+  const PERIODS = ["Week", "Month", "Year", "All Time"] as const;
+  type PeriodType = (typeof PERIODS)[number];
+  let selectedPeriod = $state<PeriodType>("Week");
+  let periodOffset = $state(0);
+  let savedDefaultPeriod = $state<PeriodType | null>(null);
+
+  async function loadDefaultPeriod() {
+    const res = await browser.storage.local.get("default_period");
+    if (res.default_period && (PERIODS as readonly string[]).includes(res.default_period)) {
+      savedDefaultPeriod = res.default_period as PeriodType;
+      selectedPeriod = res.default_period as PeriodType;
+    }
+  }
+  loadDefaultPeriod();
+
+  // ---- Period Context Menu ----
+  let periodMenu = $state<{
+    show: boolean;
+    x: number;
+    y: number;
+    period: PeriodType;
+  }>({
+    show: false,
+    x: 0,
+    y: 0,
+    period: "Week",
+  });
+
+  function handlePeriodContextMenu(p: PeriodType, e: MouseEvent) {
+    e.preventDefault();
+    closeBarMenu();
+    closeDayMenu();
+
+    periodMenu = {
+      show: true,
+      x: e.clientX,
+      y: e.clientY,
+      period: p,
+    };
+  }
+
+  function closePeriodMenu() {
+    if (periodMenu.show) periodMenu.show = false;
+  }
+
+  async function saveDefaultPeriod(p: PeriodType) {
+    if (savedDefaultPeriod === p) {
+      savedDefaultPeriod = null;
+      await browser.storage.local.remove("default_period");
+    } else {
+      savedDefaultPeriod = p;
+      selectedPeriod = p;
+      await browser.storage.local.set({ default_period: p });
+    }
+    closePeriodMenu();
+  }
+
+  // ---- Bar Context Menu ----
+  let barMenu = $state({ show: false, x: 0, y: 0, gameName: "" });
+
+  function handleBarContextMenu(name: string, x: number, y: number) {
+    closeDayMenu();
+    closePeriodMenu();
+    barMenu = { show: true, x, y, gameName: name };
+  }
+
+  function closeBarMenu() {
+    if (barMenu.show) barMenu.show = false;
+  }
+
+  // ---- Heatmap Day Context Menu ----
+  let dayMenu = $state<{
+    show: boolean;
+    x: number;
+    y: number;
+    dateStr: string;
+    games: { uuid: string; name: string; type?: string }[];
+  }>({
+    show: false,
+    x: 0,
+    y: 0,
+    dateStr: "",
+    games: [],
+  });
+
+  function handleDayContextMenu(dateStr: string, x: number, y: number) {
+    closeBarMenu();
+    closePeriodMenu();
+
+    // Find all games that have sessions on this date
+    const playedGames = uniqueGames.filter((g) =>
+      data.some((d) => d.date === dateStr && (d.uuid === g.uuid || d.name === g.name))
+    );
+
+    // If there are games played on this date, prioritize them; otherwise fallback to all active uniqueGames
+    const games = playedGames.length > 0 ? playedGames : [...uniqueGames];
+
+    // Clamp coordinates to prevent menu running off screen
+    const clampedX = Math.min(x, typeof window !== "undefined" ? window.innerWidth - 240 : x);
+    const clampedY = Math.min(y, typeof window !== "undefined" ? window.innerHeight - 300 : y);
+
+    dayMenu = {
+      show: true,
+      x: Math.max(10, clampedX),
+      y: Math.max(10, clampedY),
+      dateStr,
+      games,
+    };
+  }
+
+  function closeDayMenu() {
+    if (dayMenu.show) dayMenu.show = false;
+  }
+
+  function closeAllMenus() {
+    closeBarMenu();
+    closeDayMenu();
+    closePeriodMenu();
+  }
+
+  function handleAddCustomSession(dateStr: string, game: { uuid: string; name: string }) {
+    closeDayMenu();
+    showGamePanel = true;
+    startEditStats(game);
+    editSelectedDates = new Set([dateStr]);
+
+    // If there is an existing stat for this game on this date, pre-fill it
+    const existing = data.find(
+      (d) => d.date === dateStr && (d.uuid === game.uuid || d.name === game.name)
+    );
+    if (existing) {
+      editChars = existing.chars_read ?? 0;
+      const totalSecs = existing.time_read ?? 0;
+      editHours = Math.floor(totalSecs / 3600);
+      editMins = Math.floor((totalSecs % 3600) / 60);
+      editSecs = Math.round(totalSecs % 60);
+    }
+
+    setTimeout(() => {
+      const el =
+        document.getElementById(`game-editor-${game.uuid}`) ||
+        document.getElementById("manage_panel");
+      el?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 100);
+  }
+
+  async function handleRecalculateSession(dateStr: string, game: { uuid: string; name: string }) {
+    closeDayMenu();
+    showGamePanel = true;
+    startEditStats(game);
+    editSelectedDates = new Set([dateStr]);
+
+    setTimeout(() => {
+      const el =
+        document.getElementById(`game-editor-${game.uuid}`) ||
+        document.getElementById("manage_panel");
+      el?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 100);
+
+    await recalculateFromLines();
+  }
 
   async function refreshData() {
     const newData = await getData();
@@ -68,6 +325,7 @@
         (a, b) => parseISO(a.date).valueOf() - parseISO(b.date).valueOf(),
       ) ?? [];
     await loadDeletedGames();
+    await loadAllInstances();
   }
 
   // ---- Global Settings ----
@@ -158,9 +416,114 @@
     await loadDeletedGames();
   }
 
+  // ---- Manual Stat Edit ----
+  let editingGame = $state<{ uuid: string; name: string } | null>(null);
+  let editChars = $state(0);
+  let editLines = $state<number | undefined>(undefined);
+  let editHours = $state(0);
+  let editMins = $state(0);
+  let editSecs = $state(0);
+  let editSelectedDates = $state(new Set<string>());
+  let editSaving = $state(false);
+  let editHistory = $state<StatSnapshot[][]>([]);
+  let recalculating = $state(false);
+  let recalcMsg = $state("");
+
+  function startEditStats(game: { uuid: string; name: string }) {
+    editingGame = game;
+    editChars = 0;
+    editLines = undefined;
+    editHours = 0;
+    editMins = 0;
+    editSecs = 0;
+    editSelectedDates = new Set();
+    editHistory = [];
+    recalcMsg = "";
+  }
+
+  function handleDateToggle(dateStr: string, action: "add" | "remove") {
+    const next = new Set(editSelectedDates);
+    if (action === "add") next.add(dateStr);
+    else next.delete(dateStr);
+    editSelectedDates = next;
+  }
+
+  async function applyStats() {
+    if (!editingGame || editSelectedDates.size === 0) return;
+    editSaving = true;
+    const time_read = editHours * 3600 + editMins * 60 + editSecs;
+    const snapshots: StatSnapshot[] = [];
+    for (const date of editSelectedDates) {
+      const snap = await upsertManualStat(editingGame.uuid, date, editChars, time_read, editLines);
+      snapshots.push(snap);
+    }
+    editLines = undefined; // clear after apply so next save doesn't re-use stale lines_read
+    recalcMsg = "";
+    editHistory = [...editHistory, snapshots];
+    editSaving = false;
+    await refreshData();
+  }
+
+  async function undoLastApply() {
+    if (!editingGame || editHistory.length === 0) return;
+    const snapshots = editHistory[editHistory.length - 1];
+    editHistory = editHistory.slice(0, -1);
+    await restoreManualStats(editingGame.uuid, snapshots);
+    await refreshData();
+  }
+
+  function finishEdit() {
+    editingGame = null;
+    editHistory = [];
+    editSelectedDates = new Set();
+    editLines = undefined;
+    recalcMsg = "";
+  }
+
+  async function recalculateFromLines() {
+    if (!editingGame || editSelectedDates.size !== 1) return;
+    const date = [...editSelectedDates][0];
+    recalculating = true;
+    recalcMsg = "";
+    try {
+      const result = await repairDateStats(editingGame.uuid, date);
+      // Pre-fill chars from stored lines; time fields from the existing stored value.
+      editChars = result.chars_read;
+      editLines = result.lines_read;
+      const totalSecs = result.time_read;
+      editHours = Math.floor(totalSecs / 3600);
+      editMins = Math.floor((totalSecs % 3600) / 60);
+      editSecs = Math.round(totalSecs % 60);
+      recalcMsg = result.skippedLines > 0
+        ? `${result.chars_read} chars from stored lines (${result.skippedLines} line${result.skippedLines !== 1 ? "s" : ""} skipped — no timestamp)`
+        : `${result.chars_read} chars from stored lines`;
+    } finally {
+      recalculating = false;
+    }
+  }
+
+  // ---- New Title Creation ----
+  let newTitleName = $state("");
+  let newTitleType = $state("vn");
+  let creatingTitle = $state(false);
+
+  async function createTitle() {
+    if (!newTitleName.trim()) return;
+    creatingTitle = true;
+    const inst = await createManualTitle(newTitleName.trim(), newTitleType);
+    await loadAllInstances();
+    newTitleName = "";
+    creatingTitle = false;
+    // Immediately open the editor for the new title
+    startEditStats(inst);
+  }
+
   // ---- Game Filter ----
   let showFilterPanel = $state(false);
   let selectedGames = $state<Set<string>>(new Set());
+  /** Tracks every game name ever shown in the filter — so deselected games
+   *  aren't re-added on the next storage.onChanged refresh cycle. */
+  let knownGameNames = $state<Set<string>>(new Set());
   let filterInitialized = $state(false);
 
   let processedData = $derived(
@@ -191,15 +554,23 @@
   );
 
   // Get all unique game names for the filter
-  let allGameNames = $derived(
-    Array.from(new Set(processedData.map((d) => d.name))).sort(),
-  );
 
-  // Initialize filter with all games selected
+  // Initialize filter with all games selected; also auto-add any new names that
+  // appear after a stat write so fresh entries show up immediately.
   $effect(() => {
     if (!filterInitialized && allGameNames.length > 0) {
       selectedGames = new Set(allGameNames);
+      knownGameNames = new Set(allGameNames);
       filterInitialized = true;
+    } else if (filterInitialized) {
+      // Only auto-add games that have never appeared in the filter before.
+      // Games that are in knownGameNames but not selectedGames were
+      // intentionally deselected by the user — leave them alone.
+      const brandNewNames = allGameNames.filter((n) => !knownGameNames.has(n));
+      if (brandNewNames.length > 0) {
+        selectedGames = new Set([...selectedGames, ...brandNewNames]);
+        knownGameNames = new Set([...knownGameNames, ...brandNewNames]);
+      }
     }
   });
 
@@ -230,7 +601,10 @@
 
   let mediaType = $state("all");
 
-  let filteredData = $derived(
+  /** Year + media-type filtered data, without the selectedGames filter.
+   *  Used to derive allGameNames so the filter panel only shows games
+   *  that have data in the currently selected year / All Time view. */
+  let yearMediaData = $derived(
     (enableAllTimeView
       ? processedData
       : processedData.filter(
@@ -238,9 +612,16 @@
             selectedYearStart <= parseISO(d.date) &&
             parseISO(d.date) <= selectedYearEnd,
         )
-    )
-      .filter((d) => mediaType === "all" || d.type === mediaType)
-      .filter((d) => selectedGames.has(d.name)),
+    ).filter((d) => mediaType === "all" || d.type === mediaType),
+  );
+
+  // Get all unique game names visible in the current year/All Time + media filter.
+  let allGameNames = $derived(
+    Array.from(new Set(yearMediaData.map((d) => d.name))).sort(),
+  );
+
+  let filteredData = $derived(
+    yearMediaData.filter((d) => selectedGames.has(d.name)),
   );
 
   function syncReadingSummaryToGlobalYear(newYear: number) {
@@ -278,7 +659,13 @@
 
   const nextPeriod = () => {
     selectedYearStart = addYears(selectedYearStart, 1);
-    syncReadingSummaryToGlobalYear(getYear(selectedYearStart));
+    if (selectedYearStart > currentYearStart) {
+      // Entered All Time view — reset period offset so Reading Summary
+      // shows the current period rather than a future one.
+      periodOffset = 0;
+    } else {
+      syncReadingSummaryToGlobalYear(getYear(selectedYearStart));
+    }
   };
   const previousPeriod = () => {
     if (enableAllTimeView) {
@@ -490,11 +877,6 @@
       titlesRead: new Set(statsFilteredData.map((d) => d.name)).size,
     };
   });
-
-  // Period tab state
-  const PERIODS = ["Week", "Month", "Year", "All Time"] as const;
-  let selectedPeriod = $state<(typeof PERIODS)[number]>("Week");
-  let periodOffset = $state(0);
 
   let charAvgIndex = $state(0);
   let timeAvgIndex = $state(0);
@@ -870,13 +1252,409 @@
       return 0;
     });
   });
+
+  // ---- Detailed Statistics State & Logic ----
+  type StatKey = "chars" | "time" | "speed" | "sessionChars" | "sessionTime";
+  let detailOpen = $state(false);
+  let detailStatKey = $state<StatKey>("chars");
+  let monthSubPeriod = $state<"Week" | "Day">("Week");
+  let allTimeSubPeriod = $state<"Year" | "Month">("Year");
+  let hoveredPointIndex = $state<number | null>(null);
+  let chartWidth = $state(800);
+
+  const STAT_CONFIG: Record<
+    StatKey,
+    { label: string; unit: string; fmt: (v: number) => string }
+  > = {
+    chars: {
+      label: "Characters",
+      unit: "characters",
+      fmt: (v: number) => fmtChars(v),
+    },
+    time: {
+      label: "Time Read",
+      unit: "time",
+      fmt: (v: number) => fmtTime(v),
+    },
+    speed: {
+      label: "Reading Speed",
+      unit: "chars / hour",
+      fmt: (v: number) => `${Math.round(v).toLocaleString()} /h`,
+    },
+    sessionChars: {
+      label: "Chars / Session",
+      unit: "chars / session",
+      fmt: (v: number) => fmtChars(v),
+    },
+    sessionTime: {
+      label: "Time / Session",
+      unit: "time / session",
+      fmt: (v: number) => fmtTime(v),
+    },
+  };
+
+  function formatYAxisTick(v: number, key: StatKey): string {
+    if (v <= 0) return "0";
+    if (key === "chars" || key === "sessionChars") {
+      if (v >= 1_000_000) return `${Math.round(v / 1_000_000)}M`;
+      if (v >= 1_000) return `${Math.round(v / 1_000)}k`;
+      return `${Math.round(v)}`;
+    }
+    if (key === "time" || key === "sessionTime") {
+      const h = Math.floor(v / 3600);
+      const m = Math.round((v % 3600) / 60);
+      if (h > 0 && m > 0) return `${h}h ${m}m`;
+      if (h > 0) return `${h}h`;
+      return `${m}m`;
+    }
+    if (key === "speed") {
+      if (v >= 1_000) return `${Math.round(v / 1_000)}k/h`;
+      return `${Math.round(v)}/h`;
+    }
+    return `${Math.round(v)}`;
+  }
+
+  function selectStat(key: StatKey) {
+    detailStatKey = key;
+    detailOpen = true;
+  }
+
+  let detailGranularity = $derived.by<"Day" | "Week" | "Month" | "Year">(() => {
+    if (selectedPeriod === "Week") return "Day";
+    if (selectedPeriod === "Month") return monthSubPeriod;
+    if (selectedPeriod === "Year") return "Month";
+    return allTimeSubPeriod;
+  });
+
+  interface DetailBucket {
+    label: string;
+    chars: number;
+    time: number;
+    speed: number;
+    sessionChars: number;
+    sessionTime: number;
+    activeDays: number;
+    value: number;
+  }
+
+  let detailBuckets = $derived.by<DetailBucket[]>(() => {
+    const buckets: {
+      label: string;
+      filterFn: (d: (typeof statsFilteredData)[0]) => boolean;
+    }[] = [];
+
+    if (selectedPeriod === "Week") {
+      const days = eachDayOfInterval({
+        start: subDays(refDate, 6),
+        end: refDate,
+      });
+      for (const d of days) {
+        const dStr = formatDate(d, "yyyy-MM-dd");
+        buckets.push({
+          label: formatDate(d, "EEE d"),
+          filterFn: (entry) => entry.date === dStr,
+        });
+      }
+    } else if (selectedPeriod === "Month") {
+      const mStart = startOfMonth(refDate);
+      const mEnd = endOfMonth(refDate);
+
+      if (detailGranularity === "Day") {
+        const days = eachDayOfInterval({ start: mStart, end: mEnd });
+        for (const d of days) {
+          const dStr = formatDate(d, "yyyy-MM-dd");
+          buckets.push({
+            label: formatDate(d, "d"),
+            filterFn: (entry) => entry.date === dStr,
+          });
+        }
+      } else {
+        const weeks = eachWeekOfInterval(
+          { start: mStart, end: mEnd },
+          { weekStartsOn: 0 }
+        );
+        for (let i = 0; i < weeks.length; i++) {
+          const wS = weeks[i];
+          const wE = min([addDays(wS, 6), mEnd]) ?? mEnd;
+          buckets.push({
+            label: formatDate(wS, "MMM d"),
+            filterFn: (entry) => {
+              const eDate = parseISO(entry.date);
+              return eDate >= wS && eDate <= wE;
+            },
+          });
+        }
+      }
+    } else if (selectedPeriod === "Year") {
+      const yStart = startOfYear(refDate);
+      const yEnd = endOfYear(refDate);
+      const months = eachMonthOfInterval({ start: yStart, end: yEnd });
+      for (const m of months) {
+        buckets.push({
+          label: formatDate(m, "MMM"),
+          filterFn: (entry) =>
+            isSameMonth(parseISO(entry.date), m) &&
+            isSameYear(parseISO(entry.date), m),
+        });
+      }
+    } else {
+      // All Time
+      if (detailGranularity === "Year") {
+        const allDates = statsFilteredData.map((d) => parseISO(d.date));
+        const minY =
+          allDates.length > 0
+            ? Math.min(...allDates.map((d) => d.getFullYear()))
+            : new Date().getFullYear();
+        const maxY =
+          allDates.length > 0
+            ? Math.max(...allDates.map((d) => d.getFullYear()))
+            : new Date().getFullYear();
+        for (let y = minY; y <= maxY; y++) {
+          buckets.push({
+            label: String(y),
+            filterFn: (entry) => parseISO(entry.date).getFullYear() === y,
+          });
+        }
+      } else {
+        const allDates = statsFilteredData.map((d) => parseISO(d.date));
+        const minD =
+          allDates.length > 0
+            ? new Date(Math.min(...allDates.map((d) => d.getTime())))
+            : new Date();
+        const maxD =
+          allDates.length > 0
+            ? new Date(Math.max(...allDates.map((d) => d.getTime())))
+            : new Date();
+        const months = eachMonthOfInterval({
+          start: startOfMonth(minD),
+          end: endOfMonth(maxD),
+        });
+        for (const m of months) {
+          buckets.push({
+            label: formatDate(m, "MMM yy"),
+            filterFn: (entry) =>
+              isSameMonth(parseISO(entry.date), m) &&
+              isSameYear(parseISO(entry.date), m),
+          });
+        }
+      }
+    }
+
+    return buckets.map((b) => {
+      const entries = statsFilteredData.filter(b.filterFn);
+      const chars = sum(entries, (e) => e.chars_read) || 0;
+      const time = sum(entries, (e) => e.time_read) || 0;
+      const activeDays = new Set(entries.map((e) => e.date)).size;
+      const speed =
+        time > 0 ? Math.round((chars / time) * 3600) : 0;
+      const sessionChars =
+        activeDays > 0 ? Math.round(chars / activeDays) : 0;
+      const sessionTime = activeDays > 0 ? time / activeDays : 0;
+
+      let value = chars;
+      if (detailStatKey === "time") value = time;
+      else if (detailStatKey === "speed") value = speed;
+      else if (detailStatKey === "sessionChars") value = sessionChars;
+      else if (detailStatKey === "sessionTime") value = sessionTime;
+
+      return {
+        label: b.label,
+        chars,
+        time,
+        speed,
+        sessionChars,
+        sessionTime,
+        activeDays,
+        value,
+      };
+    });
+  });
+
+  let bestSessions = $derived.by(() => {
+    const dailyMap = new Map<string, typeof statsBaseData>();
+    for (const d of statsBaseData) {
+      if (!dailyMap.has(d.date)) dailyMap.set(d.date, []);
+      dailyMap.get(d.date)!.push(d);
+    }
+    const list = Array.from(dailyMap.entries()).map(([date, entries]) => {
+      const chars = sum(entries, (e) => e.chars_read) || 0;
+      const time = sum(entries, (e) => e.time_read) || 0;
+      const speed =
+        time >= 60
+          ? Math.round((chars / time) * 3600)
+          : time > 0
+            ? Math.round((chars / time) * 3600)
+            : 0;
+      return {
+        date,
+        periodStart: date,
+        periodEnd: date,
+        label: formatDate(parseISO(date), "EEE, MMM d, yyyy"),
+        chars,
+        time,
+        speed,
+        sessionChars: chars,
+        sessionTime: time,
+      };
+    });
+
+    list.sort((a, b) => {
+      if (detailStatKey === "chars" || detailStatKey === "sessionChars")
+        return b.chars - a.chars;
+      if (detailStatKey === "time" || detailStatKey === "sessionTime")
+        return b.time - a.time;
+      if (detailStatKey === "speed") return b.speed - a.speed;
+      return 0;
+    });
+
+    return list.slice(0, 5);
+  });
+
+  let bestWeeks = $derived.by(() => {
+    const weekMap = new Map<string, typeof statsBaseData>();
+    for (const d of statsBaseData) {
+      const wStart = formatDate(
+        startOfWeek(parseISO(d.date), { weekStartsOn: 0 }),
+        "yyyy-MM-dd"
+      );
+      if (!weekMap.has(wStart)) weekMap.set(wStart, []);
+      weekMap.get(wStart)!.push(d);
+    }
+    const list = Array.from(weekMap.entries()).map(([wStart, entries]) => {
+      const wStartDate = parseISO(wStart);
+      const wEndDate = addDays(wStartDate, 6);
+      const wEnd = formatDate(wEndDate, "yyyy-MM-dd");
+      const chars = sum(entries, (e) => e.chars_read) || 0;
+      const time = sum(entries, (e) => e.time_read) || 0;
+      const activeDays = new Set(entries.map((e) => e.date)).size;
+      const speed = time > 0 ? Math.round((chars / time) * 3600) : 0;
+      const sessionChars =
+        activeDays > 0 ? Math.round(chars / activeDays) : 0;
+      const sessionTime = activeDays > 0 ? time / activeDays : 0;
+      return {
+        periodStart: wStart,
+        periodEnd: wEnd,
+        label: `${formatDate(wStartDate, "MMM d")} - ${formatDate(wEndDate, "MMM d, yyyy")}`,
+        chars,
+        time,
+        speed,
+        sessionChars,
+        sessionTime,
+        activeDays,
+      };
+    });
+
+    list.sort((a, b) => {
+      if (detailStatKey === "chars") return b.chars - a.chars;
+      if (detailStatKey === "time") return b.time - a.time;
+      if (detailStatKey === "speed") return b.speed - a.speed;
+      if (detailStatKey === "sessionChars")
+        return b.sessionChars - a.sessionChars;
+      if (detailStatKey === "sessionTime")
+        return b.sessionTime - a.sessionTime;
+      return 0;
+    });
+
+    return list.slice(0, 5);
+  });
+
+  let bestMonths = $derived.by(() => {
+    const monthMap = new Map<string, typeof statsBaseData>();
+    for (const d of statsBaseData) {
+      const mKey = d.date.substring(0, 7);
+      if (!monthMap.has(mKey)) monthMap.set(mKey, []);
+      monthMap.get(mKey)!.push(d);
+    }
+    const list = Array.from(monthMap.entries()).map(([mKey, entries]) => {
+      const mStartDate = parseISO(`${mKey}-01`);
+      const mEndDate = endOfMonth(mStartDate);
+      const mStart = formatDate(mStartDate, "yyyy-MM-dd");
+      const mEnd = formatDate(mEndDate, "yyyy-MM-dd");
+      const chars = sum(entries, (e) => e.chars_read) || 0;
+      const time = sum(entries, (e) => e.time_read) || 0;
+      const activeDays = new Set(entries.map((e) => e.date)).size;
+      const speed = time > 0 ? Math.round((chars / time) * 3600) : 0;
+      const sessionChars =
+        activeDays > 0 ? Math.round(chars / activeDays) : 0;
+      const sessionTime = activeDays > 0 ? time / activeDays : 0;
+      return {
+        periodStart: mStart,
+        periodEnd: mEnd,
+        label: formatDate(mStartDate, "MMMM yyyy"),
+        chars,
+        time,
+        speed,
+        sessionChars,
+        sessionTime,
+        activeDays,
+      };
+    });
+
+    list.sort((a, b) => {
+      if (detailStatKey === "chars") return b.chars - a.chars;
+      if (detailStatKey === "time") return b.time - a.time;
+      if (detailStatKey === "speed") return b.speed - a.speed;
+      if (detailStatKey === "sessionChars")
+        return b.sessionChars - a.sessionChars;
+      if (detailStatKey === "sessionTime")
+        return b.sessionTime - a.sessionTime;
+      return 0;
+    });
+
+    return list.slice(0, 5);
+  });
+
+  function handleBestItemClick(
+    type: "session" | "week" | "month",
+    item: { periodStart: string; periodEnd: string }
+  ) {
+    if (
+      customHighlightStart === item.periodStart &&
+      customHighlightEnd === item.periodEnd
+    ) {
+      customHighlightStart = undefined;
+      customHighlightEnd = undefined;
+      return;
+    }
+
+    const targetDate = parseISO(item.periodEnd);
+    customHighlightStart = item.periodStart;
+    customHighlightEnd = item.periodEnd;
+
+    if (type === "session") {
+      if (!enableAllTimeView) {
+        const itemYear = targetDate.getFullYear();
+        if (getYear(selectedYearStart) !== itemYear) {
+          selectedYearStart = new Date(itemYear, 0, 1);
+        }
+      }
+    } else if (type === "week") {
+      selectedPeriod = "Week";
+      if (!enableAllTimeView) {
+        selectedYearStart = new Date(targetDate.getFullYear(), 0, 1);
+      }
+      const bDate = baseDate;
+      periodOffset = Math.round(differenceInDays(targetDate, bDate) / 7);
+    } else if (type === "month") {
+      selectedPeriod = "Month";
+      if (!enableAllTimeView) {
+        selectedYearStart = new Date(targetDate.getFullYear(), 0, 1);
+      }
+      const bDate = baseDate;
+      periodOffset =
+        (targetDate.getFullYear() - bDate.getFullYear()) * 12 +
+        (targetDate.getMonth() - bDate.getMonth());
+    }
+  }
 </script>
+
+<svelte:window onclick={closeAllMenus} onscroll={closeAllMenus} />
 
 <div class="flex flex-col gap-10 px-20">
   <!-- Top Bar -->
   <div
     id="top_bar"
-    class="sticky top-0 z-50 flex h-20 items-center justify-between bg-button bg-opacity-80"
+    class="sticky top-0 z-50 flex h-20 items-center justify-between"
   >
     <div class="flex flex-row items-center gap-2">
       <button
@@ -886,7 +1664,7 @@
     </div>
     <div class="flex flex-row place-items-center gap-3">
       <p class="header-text">{displayTime}</p>
-      <select class="bg-button" bind:value={mediaType}>
+      <select class="bg-button rounded px-2 py-1 text-white font-medium outline-none" bind:value={mediaType}>
         <option value="all">All</option>
         <option value="vn">VN</option>
         <option value="mokuro">Mokuro</option>
@@ -907,7 +1685,7 @@
   {#if showFilterPanel}
     <div class="panel">
       <div class="mb-3 flex items-center justify-between">
-        <h2 class="text-lg font-semibold text-indigo-400">Filter Games</h2>
+        <h2 class="text-lg font-semibold text-title">Filter Games</h2>
         <div class="flex gap-2">
           <button class="btn-sm btn-primary" onclick={selectAllGames}>
             Select All
@@ -940,8 +1718,74 @@
 
   <!-- Game Management Panel -->
   {#if showGamePanel}
-    <div class="panel">
-      <h2 class="mb-3 text-lg font-semibold text-indigo-400">Manage Games</h2>
+    <div class="panel" id="manage_panel">
+      <h2 class="mb-3 text-lg font-semibold text-title">Manage Games</h2>
+
+      <!-- Add / Edit Stats for any tracked game -->
+      <div class="mb-4">
+        <p class="mb-2 text-xs font-semibold uppercase tracking-widest text-muted">Add / Edit Stats</p>
+
+        <!-- New Title form -->
+        <div class="mb-3 flex flex-wrap items-center gap-2">
+          <input
+            type="text"
+            placeholder="New title name…"
+            bind:value={newTitleName}
+            onkeydown={(e) => { if (e.key === "Enter") createTitle(); }}
+            class="rename-input min-w-48 flex-1"
+          />
+          <select bind:value={newTitleType} class="rounded panel-input px-2 py-1 text-sm">
+            <option value="vn">VN</option>
+            <option value="mokuro">Mokuro</option>
+            <option value="ttu">TTU</option>
+          </select>
+          <button
+            class="btn-sm btn-primary"
+            disabled={creatingTitle || !newTitleName.trim()}
+            onclick={createTitle}
+          >
+            {creatingTitle ? "Creating…" : "+ Create"}
+          </button>
+        </div>
+
+        {#if editingGame && !uniqueGames.some((g) => g.uuid === editingGame?.uuid)}
+          <div class="mt-3 panel-sub" id="game-editor-{editingGame.uuid}">
+            <h3 class="mb-3 text-sm font-semibold text-title">Edit Stats — {editingGame.name}</h3>
+            <div class="mb-3 flex flex-wrap items-center gap-3 text-sm">
+              <label class="flex items-center gap-1 text-sub">Chars
+                <input type="number" min="0" bind:value={editChars} class="w-24 rounded panel-input px-2 py-1" />
+              </label>
+              <label class="flex items-center gap-1 text-sub">Time
+                <input type="number" min="0" max="23" bind:value={editHours} class="w-14 rounded panel-input px-2 py-1" />h
+                <input type="number" min="0" max="59" bind:value={editMins} class="w-14 rounded panel-input px-2 py-1" />m
+                <input type="number" min="0" max="59" bind:value={editSecs} class="w-14 rounded panel-input px-2 py-1" />s
+              </label>
+            </div>
+            <p class="mb-1 text-xs text-muted">👆 Click or drag dates on the heatmap above to select them.</p>
+            {#if recalcMsg}
+              <p class="mb-1 text-xs text-emerald-400">✓ {recalcMsg}</p>
+            {/if}
+            <div class="flex flex-wrap items-center justify-between gap-2">
+              <div class="flex gap-2">
+                <button class="btn-sm btn-primary" disabled={editSaving || editSelectedDates.size === 0} onclick={applyStats}>
+                  {editSaving ? 'Saving…' : 'Apply to ' + editSelectedDates.size + ' date' + (editSelectedDates.size !== 1 ? 's' : '')}
+                </button>
+                <button class="btn-sm btn-secondary" onclick={() => (editSelectedDates = new Set())}>Clear</button>
+                <button class="btn-sm btn-secondary" disabled={editHistory.length === 0} onclick={undoLastApply}>↩ Undo ({editHistory.length})</button>
+                <button
+                  class="btn-sm btn-secondary"
+                  disabled={recalculating || editSelectedDates.size !== 1}
+                  onclick={recalculateFromLines}
+                  title="Recount chars and lines from the lines stored for this date"
+                >
+                  {recalculating ? "Scanning…" : "↺ Recalculate"}
+                </button>
+              </div>
+              <button class="btn-sm btn-primary" onclick={finishEdit}>Done</button>
+            </div>
+          </div>
+        {/if}
+      </div>
 
       <!-- Active Games -->
       <div class="space-y-1">
@@ -975,7 +1819,7 @@
                   Cancel
                 </button>
               {:else}
-                <span class="truncate text-sm text-gray-200">{game.name}</span>
+                <span class="truncate text-sm text-strong">{game.name}</span>
                 <span class="type-badge">{game.type}</span>
               {/if}
             </div>
@@ -988,6 +1832,14 @@
                   onclick={() => startRename(game.uuid, game.name)}
                 >
                   ✏️
+                </button>
+
+                <button
+                  class="btn-sm btn-primary"
+                  title="Edit Stats"
+                  onclick={() => startEditStats(game)}
+                >
+                  📊
                 </button>
 
                 {#if confirmDeleteUuid === game.uuid}
@@ -1018,13 +1870,98 @@
               </div>
             {/if}
           </div>
+
+          <!-- Edit Stats sub-panel -->
+          {#if editingGame?.uuid === game.uuid}
+            <div class="mt-3 panel-sub" id="game-editor-{game.uuid}">
+              <h3 class="mb-3 text-sm font-semibold text-title">Edit Stats — {game.name}</h3>
+
+              <!-- Inputs -->
+              <div class="mb-3 flex flex-wrap items-center gap-3 text-sm">
+                <label class="flex items-center gap-1 text-sub">
+                  Chars
+                  <input
+                    type="number"
+                    min="0"
+                    bind:value={editChars}
+                    class="w-24 rounded panel-input px-2 py-1"
+                  />
+                </label>
+                <label class="flex items-center gap-1 text-sub">
+                  Time
+                  <input
+                    type="number"
+                    min="0"
+                    max="23"
+                    bind:value={editHours}
+                    class="w-14 rounded panel-input px-2 py-1"
+                  />h
+                  <input
+                    type="number"
+                    min="0"
+                    max="59"
+                    bind:value={editMins}
+                    class="w-14 rounded panel-input px-2 py-1"
+                  />m
+                  <input
+                    type="number"
+                    min="0"
+                    max="59"
+                    bind:value={editSecs}
+                    class="w-14 rounded panel-input px-2 py-1"
+                  />s
+                </label>
+              </div>
+
+              <p class="mb-1 text-xs text-muted">👆 Click or drag dates on the heatmap above to select them.</p>
+
+              {#if recalcMsg}
+                <p class="mb-1 text-xs text-emerald-400">✓ {recalcMsg}</p>
+              {/if}
+
+              <!-- Action row -->
+              <div class="flex flex-wrap items-center justify-between gap-2">
+                <div class="flex gap-2">
+                  <button
+                    class="btn-sm btn-primary"
+                    disabled={editSaving || editSelectedDates.size === 0}
+                    onclick={applyStats}
+                  >
+                    {editSaving ? "Saving…" : `Apply to ${editSelectedDates.size} date${editSelectedDates.size !== 1 ? "s" : ""}`}
+                  </button>
+                  <button
+                    class="btn-sm btn-secondary"
+                    onclick={() => (editSelectedDates = new Set())}
+                  >
+                    Clear
+                  </button>
+                  <button
+                    class="btn-sm btn-secondary"
+                    disabled={editHistory.length === 0}
+                    onclick={undoLastApply}
+                  >
+                    ↩ Undo ({editHistory.length})
+                  </button>
+                  <button
+                    class="btn-sm btn-secondary"
+                    disabled={recalculating || editSelectedDates.size !== 1}
+                    onclick={recalculateFromLines}
+                    title="Recount chars and lines from the lines stored for this date"
+                  >
+                    {recalculating ? "Scanning…" : "↺ Recalculate"}
+                  </button>
+                </div>
+                <button class="btn-sm btn-primary" onclick={finishEdit}>Done</button>
+              </div>
+            </div>
+          {/if}
         {/each}
       </div>
 
       <!-- Deleted Games -->
       {#if deletedGames.length > 0}
         <button
-          class="mt-4 text-sm text-gray-400 hover:text-gray-200"
+          class="mt-4 text-sm text-muted hover:text-strong"
           onclick={() => (showDeletedGames = !showDeletedGames)}
         >
           {showDeletedGames ? "▾" : "▸"} Deleted Games ({deletedGames.length})
@@ -1035,11 +1972,11 @@
             {#each deletedGames as game}
               <div class="game-row game-row-deleted">
                 <div class="flex min-w-0 flex-1 items-center gap-2">
-                  <span class="truncate text-sm text-gray-400 line-through"
+                  <span class="truncate text-sm text-muted line-through"
                     >{game.name}</span
                   >
                   <span class="type-badge">{game.type}</span>
-                  <span class="text-[10px] text-gray-600">
+                  <span class="text-[10px] text-muted">
                     {new Date(game.deleted_at).toLocaleDateString()}
                   </span>
                 </div>
@@ -1078,43 +2015,102 @@
           </div>
         {/if}
       {/if}
+
+      <!-- Merge Duplicates -->
+      {#if duplicateGroups.length > 0}
+        <button
+          class="mt-4 text-sm text-yellow-400 hover:text-yellow-200"
+          onclick={() => (showDuplicates = !showDuplicates)}
+        >
+          {showDuplicates ? "▾" : "▸"} Duplicate Titles ({duplicateGroups.length})
+        </button>
+
+        {#if showDuplicates}
+          <div class="mt-2 space-y-1">
+            {#each duplicateGroups as group}
+              <div class="game-row items-center">
+                <div class="flex min-w-0 flex-1 items-center gap-2">
+                  <span class="truncate text-sm text-yellow-300">{group.name}</span>
+                  <span class="type-badge">{group.uuids.length} entries</span>
+                </div>
+                <button
+                  class="btn-sm btn-primary shrink-0"
+                  disabled={mergingGroup === group.name}
+                  onclick={() => handleMerge(group)}
+                >
+                  {mergingGroup === group.name ? "Merging…" : "⊕ Merge"}
+                </button>
+              </div>
+            {/each}
+          </div>
+        {/if}
+      {/if}
+
+      <!-- Merge History -->
+      {#if mergeHistory.length > 0}
+        <div class="mt-4 border-t border-dim pt-4">
+          <p class="mb-2 text-xs font-semibold uppercase tracking-widest text-muted">Merge History</p>
+          <div class="space-y-1">
+            {#each mergeHistory as snap}
+              <div class="game-row items-center">
+                <div class="flex min-w-0 flex-1 flex-col gap-0.5">
+                  <span class="truncate text-sm text-strong">
+                    <span class="text-accent">{snap.secondaryName}</span>
+                    → <span class="text-accent">{snap.primaryName}</span>
+                  </span>
+                  <span class="text-[10px] text-muted">
+                    {new Date(snap.timestamp).toLocaleString()}
+                  </span>
+                </div>
+                <button
+                  class="btn-sm btn-restore shrink-0"
+                  disabled={undoingMerge === snap.timestamp}
+                  onclick={() => handleUndoMerge(snap)}
+                >
+                  {undoingMerge === snap.timestamp ? "Restoring…" : "↩ Undo"}
+                </button>
+              </div>
+            {/each}
+          </div>
+        </div>
+      {/if}
     </div>
   {/if}
 
   {#if filteredData.length > 0}
     <!-- Activity & Streak Section -->
     <div
-      class="flex w-full flex-col items-center gap-6 rounded-xl bg-slate-900 p-8 shadow-lg shadow-black/20"
+      class="activity-section flex w-full flex-col items-center gap-6 p-8"
     >
       <div class="flex flex-row items-end justify-center gap-16">
         <div class="flex flex-col items-center">
-          <span class="text-4xl font-bold text-gray-100"
+          <span class="text-4xl font-bold text-strong"
             >{periodData.localActiveDays}</span
           >
           <span
-            class="mt-2 text-[11px] font-semibold uppercase tracking-[0.25em] text-indigo-400"
+            class="mt-2 text-[11px] font-semibold uppercase tracking-[0.25em] text-title"
             >Active Days</span
           >
         </div>
         <div class="flex flex-col items-center">
-          <span class="text-4xl font-bold text-indigo-300"
+          <span class="text-4xl font-bold text-title"
             >{periodOffset === 0 && statCards.currentStreak > 0
               ? statCards.currentStreak
               : "—"}</span
           >
           <span
-            class="mt-2 text-[11px] font-semibold uppercase tracking-[0.25em] text-indigo-400"
+            class="mt-2 text-[11px] font-semibold uppercase tracking-[0.25em] text-title"
             >Current Streak</span
           >
         </div>
         <div class="flex flex-col items-center">
-          <span class="text-4xl font-bold text-gray-400"
+          <span class="text-4xl font-bold text-muted"
             >{periodData.localBestStreak > 0
               ? periodData.localBestStreak
               : "—"}</span
           >
           <span
-            class="mt-2 text-[11px] font-semibold uppercase tracking-[0.25em] text-indigo-400"
+            class="mt-2 text-[11px] font-semibold uppercase tracking-[0.25em] text-title"
             >Best Streak</span
           >
         </div>
@@ -1132,6 +2128,12 @@
             highlight_dates={legendHighlightDates}
             tooltip_accessors={heatmap_tooltip_accessors}
             tooltip_formatters={heatmap_tooltip_formatters}
+            selectable={!!editingGame}
+            selectedDates={editSelectedDates}
+            onDateToggle={handleDateToggle}
+            onDayClick={(dateStr) => toggleHighlight(dateStr)}
+            onDayContextMenu={handleDayContextMenu}
+            viewYear={getYear(selectedYearStart)}
           />
         </div>
       {/if}
@@ -1148,6 +2150,7 @@
             class="stats-tab"
             class:stats-tab-active={selectedPeriod === p}
             onclick={() => (selectedPeriod = p)}
+            oncontextmenu={(e) => handlePeriodContextMenu(p, e)}
           >
             Per {p}
           </button>
@@ -1175,7 +2178,13 @@
         <div class="stats-line"></div>
       </div>
       <div class="stats-grid stats-grid-5">
-        <div class="stat-card stat-card-highlight">
+        <!-- svelte-ignore a11y_click_events_have_key_events -->
+        <!-- svelte-ignore a11y_no_static_element_interactions -->
+        <div
+          class="stat-card stat-card-highlight cursor-pointer transition-all hover:scale-[1.01]"
+          class:stat-card-selected={detailOpen && detailStatKey === "chars"}
+          onclick={() => selectStat("chars")}
+        >
           <div class="stat-card-accent-bar"></div>
           <span class="stat-label">Characters</span>
           <span class="stat-value stat-value-lg stat-value-accent"
@@ -1188,7 +2197,7 @@
           >
 
           {#if activeSubPeriods.length > 0}
-            <div class="my-3 h-[1px] w-full bg-slate-700/50"></div>
+            <div class="stat-divider"></div>
             <!-- svelte-ignore a11y_no_static_element_interactions -->
             <div
               class="relative flex w-full flex-wrap gap-x-4 gap-y-2 text-sm"
@@ -1232,14 +2241,20 @@
           {/if}
         </div>
 
-        <div class="stat-card stat-card-highlight">
+        <!-- svelte-ignore a11y_click_events_have_key_events -->
+        <!-- svelte-ignore a11y_no_static_element_interactions -->
+        <div
+          class="stat-card stat-card-highlight cursor-pointer transition-all hover:scale-[1.01]"
+          class:stat-card-selected={detailOpen && detailStatKey === "time"}
+          onclick={() => selectStat("time")}
+        >
           <div class="stat-card-accent-bar"></div>
           <span class="stat-label">Time Read</span>
           <span class="stat-value stat-value-lg">{fmtTime($twTotalTime)}</span>
           <span class="stat-sub">{periodData.totalLabel}</span>
 
           {#if activeSubPeriods.length > 0}
-            <div class="my-3 h-[1px] w-full bg-slate-700/50"></div>
+            <div class="stat-divider"></div>
             <!-- svelte-ignore a11y_no_static_element_interactions -->
             <div
               class="relative flex w-full flex-wrap gap-x-4 gap-y-2 text-sm"
@@ -1283,7 +2298,13 @@
           {/if}
         </div>
 
-        <div class="stat-card stat-card-highlight">
+        <!-- svelte-ignore a11y_click_events_have_key_events -->
+        <!-- svelte-ignore a11y_no_static_element_interactions -->
+        <div
+          class="stat-card stat-card-highlight cursor-pointer transition-all hover:scale-[1.01]"
+          class:stat-card-selected={detailOpen && detailStatKey === "speed"}
+          onclick={() => selectStat("speed")}
+        >
           <div class="stat-card-accent-bar"></div>
           <span class="stat-label">Reading Speed</span>
           <span class="stat-value stat-value-lg stat-value-accent"
@@ -1292,13 +2313,16 @@
           <span class="stat-sub">avg ch / hour</span>
 
           {#if periodData.bestSpeed !== undefined}
-            <div class="my-3 h-[1px] w-full bg-slate-700/50"></div>
+            <div class="stat-divider"></div>
             <!-- svelte-ignore a11y_click_events_have_key_events -->
             <!-- svelte-ignore a11y_no_static_element_interactions -->
             <div class="flex w-full flex-wrap gap-x-6 gap-y-2 text-sm">
               <div
                 class="-m-1 flex cursor-pointer flex-col rounded p-1 transition-colors hover:bg-black/5"
-                onclick={() => toggleHighlight(periodData.bestSpeedDate)}
+                onclick={(e) => {
+                  e.stopPropagation();
+                  toggleHighlight(periodData.bestSpeedDate);
+                }}
               >
                 <span
                   class="font-substat-label text-[10px] uppercase tracking-wider text-black/60"
@@ -1316,7 +2340,10 @@
               </div>
               <div
                 class="-m-1 flex cursor-pointer flex-col rounded p-1 transition-colors hover:bg-black/5"
-                onclick={() => toggleHighlight(periodData.worstSpeedDate)}
+                onclick={(e) => {
+                  e.stopPropagation();
+                  toggleHighlight(periodData.worstSpeedDate);
+                }}
               >
                 <span
                   class="font-substat-label text-[10px] uppercase tracking-wider text-black/60"
@@ -1336,7 +2363,13 @@
           {/if}
         </div>
 
-        <div class="stat-card stat-card-highlight">
+        <!-- svelte-ignore a11y_click_events_have_key_events -->
+        <!-- svelte-ignore a11y_no_static_element_interactions -->
+        <div
+          class="stat-card stat-card-highlight cursor-pointer transition-all hover:scale-[1.01]"
+          class:stat-card-selected={detailOpen && detailStatKey === "sessionChars"}
+          onclick={() => selectStat("sessionChars")}
+        >
           <div class="stat-card-accent-bar"></div>
           <span class="stat-label">Chars / Session</span>
           <span class="stat-value stat-value-lg stat-value-accent"
@@ -1345,13 +2378,16 @@
           <span class="stat-sub">per session</span>
 
           {#if periodData.bestChars !== undefined}
-            <div class="my-3 h-[1px] w-full bg-slate-700/50"></div>
+            <div class="stat-divider"></div>
             <!-- svelte-ignore a11y_click_events_have_key_events -->
             <!-- svelte-ignore a11y_no_static_element_interactions -->
             <div class="flex w-full flex-wrap gap-x-6 gap-y-2 text-sm">
               <div
                 class="-m-1 flex cursor-pointer flex-col rounded p-1 transition-colors hover:bg-black/5"
-                onclick={() => toggleHighlight(periodData.bestCharsDate)}
+                onclick={(e) => {
+                  e.stopPropagation();
+                  toggleHighlight(periodData.bestCharsDate);
+                }}
               >
                 <span
                   class="font-substat-label text-[10px] uppercase tracking-wider text-black/60"
@@ -1364,7 +2400,10 @@
               </div>
               <div
                 class="-m-1 flex cursor-pointer flex-col rounded p-1 transition-colors hover:bg-black/5"
-                onclick={() => toggleHighlight(periodData.worstCharsDate)}
+                onclick={(e) => {
+                  e.stopPropagation();
+                  toggleHighlight(periodData.worstCharsDate);
+                }}
               >
                 <span
                   class="font-substat-label text-[10px] uppercase tracking-wider text-black/60"
@@ -1379,7 +2418,13 @@
           {/if}
         </div>
 
-        <div class="stat-card stat-card-highlight">
+        <!-- svelte-ignore a11y_click_events_have_key_events -->
+        <!-- svelte-ignore a11y_no_static_element_interactions -->
+        <div
+          class="stat-card stat-card-highlight cursor-pointer transition-all hover:scale-[1.01]"
+          class:stat-card-selected={detailOpen && detailStatKey === "sessionTime"}
+          onclick={() => selectStat("sessionTime")}
+        >
           <div class="stat-card-accent-bar"></div>
           <span class="stat-label">Time / Session</span>
           <span class="stat-value stat-value-lg">{fmtTime($twSessionTime)}</span
@@ -1387,13 +2432,16 @@
           <span class="stat-sub">per session</span>
 
           {#if periodData.bestTime !== undefined}
-            <div class="my-3 h-[1px] w-full bg-slate-700/50"></div>
+            <div class="stat-divider"></div>
             <!-- svelte-ignore a11y_click_events_have_key_events -->
             <!-- svelte-ignore a11y_no_static_element_interactions -->
             <div class="flex w-full flex-wrap gap-x-6 gap-y-2 text-sm">
               <div
                 class="-m-1 flex cursor-pointer flex-col rounded p-1 transition-colors hover:bg-black/5"
-                onclick={() => toggleHighlight(periodData.bestTimeDate)}
+                onclick={(e) => {
+                  e.stopPropagation();
+                  toggleHighlight(periodData.bestTimeDate);
+                }}
               >
                 <span
                   class="font-substat-label text-[10px] uppercase tracking-wider text-black/60"
@@ -1406,7 +2454,10 @@
               </div>
               <div
                 class="-m-1 flex cursor-pointer flex-col rounded p-1 transition-colors hover:bg-black/5"
-                onclick={() => toggleHighlight(periodData.worstTimeDate)}
+                onclick={(e) => {
+                  e.stopPropagation();
+                  toggleHighlight(periodData.worstTimeDate);
+                }}
               >
                 <span
                   class="font-substat-label text-[10px] uppercase tracking-wider text-black/60"
@@ -1421,6 +2472,408 @@
           {/if}
         </div>
       </div>
+
+      <!-- Detailed Statistics Accordion Toggle -->
+      <button
+        type="button"
+        class="detail-toggle-btn group mt-4 flex w-full items-center justify-center gap-2 border-t border-dim py-3 text-xs font-semibold uppercase tracking-widest text-muted transition-all hover:text-accent cursor-pointer"
+        onclick={() => (detailOpen = !detailOpen)}
+      >
+        <span>Detailed Statistics</span>
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke-width="2.5"
+          stroke="currentColor"
+          class="h-3.5 w-3.5 transition-transform duration-300 group-hover:text-accent {detailOpen ? 'rotate-180' : ''}"
+        >
+          <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
+        </svg>
+      </button>
+
+      {#if detailOpen}
+        <div class="detail-panel flex flex-col gap-6 pt-4 border-t border-dim" transition:slide={{ duration: 300 }}>
+          <!-- Part 1: Chart section -->
+          <div class="flex flex-col gap-3">
+            <div class="flex flex-wrap items-center justify-between gap-3">
+              <div class="flex items-center gap-2">
+                <span class="text-sm font-bold uppercase tracking-wider text-title">
+                  {STAT_CONFIG[detailStatKey].label} Over Time
+                </span>
+                <span class="text-xs text-muted">
+                  • {periodData.totalLabel} (per {detailGranularity.toLowerCase()})
+                </span>
+              </div>
+
+              <!-- Special sub-period toggle for Month / All Time -->
+              {#if selectedPeriod === "Month"}
+                <div class="flex items-center gap-1.5">
+                  <span class="text-[11px] text-muted font-mono uppercase">Unit:</span>
+                  <div class="flex items-center rounded bg-black/5 dark:bg-white/5 p-0.5 border border-dim">
+                    <button
+                      type="button"
+                      class="px-2 py-0.5 text-xs rounded transition-all {monthSubPeriod === 'Week' ? 'bg-button text-white shadow-sm font-medium' : 'text-muted hover:text-strong'}"
+                      onclick={() => (monthSubPeriod = 'Week')}
+                    >
+                      Per Week
+                    </button>
+                    <button
+                      type="button"
+                      class="px-2 py-0.5 text-xs rounded transition-all {monthSubPeriod === 'Day' ? 'bg-button text-white shadow-sm font-medium' : 'text-muted hover:text-strong'}"
+                      onclick={() => (monthSubPeriod = 'Day')}
+                    >
+                      Per Day
+                    </button>
+                  </div>
+                </div>
+              {:else if selectedPeriod === "All Time"}
+                <div class="flex items-center gap-1.5">
+                  <span class="text-[11px] text-muted font-mono uppercase">Unit:</span>
+                  <div class="flex items-center rounded bg-black/5 dark:bg-white/5 p-0.5 border border-dim">
+                    <button
+                      type="button"
+                      class="px-2 py-0.5 text-xs rounded transition-all {allTimeSubPeriod === 'Year' ? 'bg-button text-white shadow-sm font-medium' : 'text-muted hover:text-strong'}"
+                      onclick={() => (allTimeSubPeriod = 'Year')}
+                    >
+                      Per Year
+                    </button>
+                    <button
+                      type="button"
+                      class="px-2 py-0.5 text-xs rounded transition-all {allTimeSubPeriod === 'Month' ? 'bg-button text-white shadow-sm font-medium' : 'text-muted hover:text-strong'}"
+                      onclick={() => (allTimeSubPeriod = 'Month')}
+                    >
+                      Per Month
+                    </button>
+                  </div>
+                </div>
+              {/if}
+            </div>
+
+            <!-- SVG Line Chart with Dots & Area Fill -->
+            <div class="detail-chart-wrap relative w-full pt-2" bind:clientWidth={chartWidth}>
+              {#if detailBuckets.length > 0}
+                {@const margin = { top: 15, right: 30, bottom: 40, left: 65 }}
+                {@const innerW = Math.max(100, chartWidth - margin.left - margin.right)}
+                {@const innerH = 175}
+                {@const svgH = innerH + margin.top + margin.bottom}
+                {@const maxV = max(detailBuckets, (d) => d.value) ?? 0}
+                {@const yMax = maxV > 0 ? maxV * 1.15 : 10}
+                {@const xSc = scalePoint<number>()
+                  .domain(detailBuckets.map((_, i) => i))
+                  .range([0, innerW])
+                  .padding(detailBuckets.length === 1 ? 0.5 : 0.08)}
+                {@const ySc = scaleLinear().domain([0, yMax]).range([innerH, 0])}
+                {@const lineD = line<any>()
+                  .x((_, i) => xSc(i) ?? 0)
+                  .y((d) => ySc(d.value))
+                  .curve(curveMonotoneX)(detailBuckets)}
+                {@const areaD = area<any>()
+                  .x((_, i) => xSc(i) ?? 0)
+                  .y0(innerH)
+                  .y1((d) => ySc(d.value))
+                  .curve(curveMonotoneX)(detailBuckets)}
+                {@const yTicks = ySc.ticks(4)}
+
+                <!-- svelte-ignore a11y_no_static_element_interactions -->
+                <svg
+                  width={chartWidth}
+                  height={svgH}
+                  role="img"
+                  aria-label="Detailed statistics line chart"
+                  class="overflow-visible select-none"
+                  onmouseleave={() => (hoveredPointIndex = null)}
+                >
+                  <g transform="translate({margin.left}, {margin.top})">
+                    <!-- Horizontal grid lines and Y-axis labels -->
+                    {#each yTicks as t}
+                      {@const yPos = ySc(t)}
+                      <line
+                        x1={0}
+                        x2={innerW}
+                        y1={yPos}
+                        y2={yPos}
+                        stroke="var(--exs-border)"
+                        stroke-opacity="0.4"
+                        stroke-dasharray="3 3"
+                      />
+                      <text
+                        x={-10}
+                        y={yPos}
+                        fill="var(--exs-text-muted)"
+                        font-size="10"
+                        font-family="monospace"
+                        text-anchor="end"
+                        dominant-baseline="middle"
+                      >
+                        {formatYAxisTick(t, detailStatKey)}
+                      </text>
+                    {/each}
+
+                    <!-- Baseline -->
+                    <line x1={0} x2={innerW} y1={innerH} y2={innerH} stroke="var(--exs-border)" stroke-opacity="0.7" />
+
+                    <!-- Area fill -->
+                    {#if areaD && detailBuckets.length > 1}
+                      <path d={areaD} fill="var(--exs-accent)" fill-opacity="0.12" />
+                    {/if}
+
+                    <!-- Line path -->
+                    {#if lineD && detailBuckets.length > 1}
+                      <path
+                        d={lineD}
+                        fill="none"
+                        stroke="var(--exs-accent)"
+                        stroke-width="2.5"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                      />
+                    {/if}
+
+                    <!-- Data points / dots: appear when hovering over the space for each duration -->
+                    {#each detailBuckets as b, i}
+                      {@const cx = xSc(i) ?? 0}
+                      {@const cy = ySc(b.value)}
+                      {@const isHovered = hoveredPointIndex === i}
+                      {@const slice = (() => {
+                        if (detailBuckets.length <= 1) {
+                          const w = Math.min(innerW * 0.5, 200);
+                          return { x: Math.max(0, cx - w / 2), w };
+                        }
+                        if (i === 0) {
+                          const nextMid = ((xSc(0) ?? 0) + (xSc(1) ?? 0)) / 2;
+                          return { x: 0, w: nextMid };
+                        }
+                        if (i === detailBuckets.length - 1) {
+                          const prevMid = ((xSc(i - 1) ?? 0) + (xSc(i) ?? 0)) / 2;
+                          return { x: prevMid, w: Math.max(0, innerW - prevMid) };
+                        }
+                        const prevMid = ((xSc(i - 1) ?? 0) + (xSc(i) ?? 0)) / 2;
+                        const nextMid = ((xSc(i) ?? 0) + (xSc(i + 1) ?? 0)) / 2;
+                        return { x: prevMid, w: Math.max(0, nextMid - prevMid) };
+                      })()}
+                      <!-- Invisible hover hit target spanning the duration's column space -->
+                      <!-- svelte-ignore a11y_no_static_element_interactions -->
+                      <rect
+                        x={slice.x}
+                        y={0}
+                        width={slice.w}
+                        height={innerH + 30}
+                        fill="transparent"
+                        class="cursor-pointer"
+                        onmouseenter={() => (hoveredPointIndex = i)}
+                      />
+
+                      <!-- Dot: only visible when hovering over this duration's space -->
+                      {#if isHovered}
+                        <circle
+                          {cx}
+                          {cy}
+                          r="6"
+                          fill="var(--exs-accent)"
+                          stroke="var(--exs-surface)"
+                          stroke-width="2.5"
+                          class="pointer-events-none drop-shadow"
+                        />
+                      {/if}
+
+                      <!-- X axis labels -->
+                      {@const step = detailBuckets.length > 20 ? Math.ceil(detailBuckets.length / 12) : 1}
+                      {#if i % step === 0 || i === detailBuckets.length - 1}
+                        <text
+                          x={cx}
+                          y={innerH + 20}
+                          fill={isHovered ? "var(--exs-accent)" : "var(--exs-text-muted)"}
+                          font-size="10"
+                          font-family="sans-serif"
+                          text-anchor="middle"
+                          class="transition-colors"
+                        >
+                          {b.label}
+                        </text>
+                      {/if}
+                    {/each}
+                  </g>
+                </svg>
+
+                <!-- Hover tooltip card -->
+                {#if hoveredPointIndex !== null && detailBuckets[hoveredPointIndex]}
+                  {@const curB = detailBuckets[hoveredPointIndex]}
+                  {@const curX = margin.left + (xSc(hoveredPointIndex) ?? 0)}
+                  {@const curY = margin.top + ySc(curB.value)}
+                  {@const tooltipLeft = Math.min(Math.max(10, curX - 90), chartWidth - 195)}
+                  {@const tooltipTop = curY < 90 ? curY + 15 : curY - 85}
+                  <div
+                    class="absolute pointer-events-none z-30 rounded-lg p-2.5 shadow-xl border border-dim bg-surface text-strong text-xs"
+                    style="left: {tooltipLeft}px; top: {tooltipTop}px; min-width: 175px;"
+                  >
+                    <div class="font-semibold text-strong border-b border-dim pb-1 mb-1.5 flex items-center justify-between">
+                      <span>{curB.label}</span>
+                      <span class="text-[10px] text-accent font-bold font-mono">
+                        {STAT_CONFIG[detailStatKey].fmt(curB.value)}
+                      </span>
+                    </div>
+                    <div class="space-y-0.5 text-[11px]">
+                      {#if detailStatKey !== 'chars' && (detailGranularity === 'Day' ? detailStatKey !== 'sessionChars' : true)}
+                        <div class="flex justify-between">
+                          <span class="text-muted">Characters:</span>
+                          <span class="font-mono font-medium">{fmtChars(curB.chars)}</span>
+                        </div>
+                      {/if}
+                      {#if detailStatKey !== 'time' && (detailGranularity === 'Day' ? detailStatKey !== 'sessionTime' : true)}
+                        <div class="flex justify-between">
+                          <span class="text-muted">Time Read:</span>
+                          <span class="font-mono font-medium">{fmtTime(curB.time)}</span>
+                        </div>
+                      {/if}
+                      {#if detailStatKey !== 'speed'}
+                        <div class="flex justify-between">
+                          <span class="text-muted">Reading Speed:</span>
+                          <span class="font-mono font-medium">{Math.round(curB.speed).toLocaleString()} /h</span>
+                        </div>
+                      {/if}
+                      {#if detailGranularity !== 'Day'}
+                        <div class="flex justify-between">
+                          <span class="text-muted">Active Days:</span>
+                          <span class="font-mono font-medium">{curB.activeDays}</span>
+                        </div>
+                      {/if}
+                    </div>
+                  </div>
+                {/if}
+              {:else}
+                <p class="py-8 text-center text-xs text-muted">No data available for this duration</p>
+              {/if}
+            </div>
+          </div>
+
+          <!-- Section Divider -->
+          <div class="stat-divider"></div>
+
+          <!-- Part 2: Top 5 Leaderboards (Best sessions, best weeks, best months) -->
+          <div class="flex flex-col gap-3">
+            <div class="flex items-center gap-2">
+              <span class="text-sm font-bold uppercase tracking-wider text-title">
+                Leaderboards
+              </span>
+              <span class="text-xs text-muted">
+                • ranked by {STAT_CONFIG[detailStatKey].label.toLowerCase()}
+              </span>
+            </div>
+
+            <!-- Leaderboard Cards Container -->
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+              <!-- Best Sessions Card -->
+              <div class="best-list-card rounded-xl p-4 flex flex-col gap-2">
+                <div class="flex items-center justify-between mb-1 pb-1 border-b border-dim/30">
+                  <h4 class="text-xs font-bold uppercase tracking-wider text-title flex items-center gap-1.5">
+                    <span>📅</span> Best Sessions
+                  </h4>
+                </div>
+                <div class="flex flex-col gap-1.5">
+                  {#each bestSessions as item, rank}
+                    {@const medal = ['🥇','🥈','🥉'][rank] ?? null}
+                    {@const primaryVal = (() => {
+                      if (detailStatKey === 'chars' || detailStatKey === 'sessionChars') return fmtChars(item.chars);
+                      if (detailStatKey === 'time' || detailStatKey === 'sessionTime') return fmtTime(item.time);
+                      return `${Math.round(item.speed).toLocaleString()}/h`;
+                    })()}
+                    {@const isSelected = customHighlightStart === item.periodStart && customHighlightEnd === item.periodEnd}
+                    <button
+                      type="button"
+                      class="leaderboard-row rank-{rank + 1} group"
+                      class:leaderboard-row-selected={isSelected}
+                      onclick={() => handleBestItemClick("session", item)}
+                    >
+                      <span class="lb-medal">{medal ?? `${rank + 1}`}</span>
+                      <div class="lb-body">
+                        <span class="lb-label group-hover:text-accent transition-colors">{item.label}</span>
+                        <span class="lb-secondary">{fmtChars(item.chars)} · {fmtTime(item.time)} · {Math.round(item.speed).toLocaleString()}/h</span>
+                      </div>
+                      <span class="lb-value">{primaryVal}</span>
+                    </button>
+                  {/each}
+                  {#if bestSessions.length === 0}
+                    <p class="text-xs text-muted text-center py-4">No session data available</p>
+                  {/if}
+                </div>
+              </div>
+
+              <!-- Best Weeks Card -->
+              <div class="best-list-card rounded-xl p-4 flex flex-col gap-2">
+                <div class="flex items-center justify-between mb-1 pb-1 border-b border-dim/30">
+                  <h4 class="text-xs font-bold uppercase tracking-wider text-title flex items-center gap-1.5">
+                    <span>📊</span> Best Weeks
+                  </h4>
+                </div>
+                <div class="flex flex-col gap-1.5">
+                  {#each bestWeeks as item, rank}
+                    {@const medal = ['🥇','🥈','🥉'][rank] ?? null}
+                    {@const primaryVal = (() => {
+                      if (detailStatKey === 'chars' || detailStatKey === 'sessionChars') return fmtChars(item.chars);
+                      if (detailStatKey === 'time' || detailStatKey === 'sessionTime') return fmtTime(item.time);
+                      return `${Math.round(item.speed).toLocaleString()}/h`;
+                    })()}
+                    {@const isSelected = customHighlightStart === item.periodStart && customHighlightEnd === item.periodEnd}
+                    <button
+                      type="button"
+                      class="leaderboard-row rank-{rank + 1} group"
+                      class:leaderboard-row-selected={isSelected}
+                      onclick={() => handleBestItemClick("week", item)}
+                    >
+                      <span class="lb-medal">{medal ?? `${rank + 1}`}</span>
+                      <div class="lb-body">
+                        <span class="lb-label group-hover:text-accent transition-colors">{item.label}</span>
+                        <span class="lb-secondary">{fmtChars(item.chars)} · {fmtTime(item.time)} · {Math.round(item.speed).toLocaleString()}/h</span>
+                      </div>
+                      <span class="lb-value">{primaryVal}</span>
+                    </button>
+                  {/each}
+                  {#if bestWeeks.length === 0}
+                    <p class="text-xs text-muted text-center py-4">No week data available</p>
+                  {/if}
+                </div>
+              </div>
+
+              <!-- Best Months Card -->
+              <div class="best-list-card rounded-xl p-4 flex flex-col gap-2">
+                <div class="flex items-center justify-between mb-1 pb-1 border-b border-dim/30">
+                  <h4 class="text-xs font-bold uppercase tracking-wider text-title flex items-center gap-1.5">
+                    <span>🗓️</span> Best Months
+                  </h4>
+                </div>
+                <div class="flex flex-col gap-1.5">
+                  {#each bestMonths as item, rank}
+                    {@const medal = ['🥇','🥈','🥉'][rank] ?? null}
+                    {@const primaryVal = (() => {
+                      if (detailStatKey === 'chars' || detailStatKey === 'sessionChars') return fmtChars(item.chars);
+                      if (detailStatKey === 'time' || detailStatKey === 'sessionTime') return fmtTime(item.time);
+                      return `${Math.round(item.speed).toLocaleString()}/h`;
+                    })()}
+                    {@const isSelected = customHighlightStart === item.periodStart && customHighlightEnd === item.periodEnd}
+                    <button
+                      type="button"
+                      class="leaderboard-row rank-{rank + 1} group"
+                      class:leaderboard-row-selected={isSelected}
+                      onclick={() => handleBestItemClick("month", item)}
+                    >
+                      <span class="lb-medal">{medal ?? `${rank + 1}`}</span>
+                      <div class="lb-body">
+                        <span class="lb-label group-hover:text-accent transition-colors">{item.label}</span>
+                        <span class="lb-secondary">{fmtChars(item.chars)} · {fmtTime(item.time)} · {Math.round(item.speed).toLocaleString()}/h</span>
+                      </div>
+                      <span class="lb-value">{primaryVal}</span>
+                    </button>
+                  {/each}
+                  {#if bestMonths.length === 0}
+                    <p class="text-xs text-muted text-center py-4">No month data available</p>
+                  {/if}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      {/if}
     </div>
     <BulkDataGraphs
       data={filteredData}
@@ -1445,16 +2898,122 @@
       {tooltip_formatters}
       {color_overrides}
       oncolorchange={handleColorChange}
+      onbarcontextmenu={handleBarContextMenu}
+      hiddenCount={allGameNames.length - selectedGames.size}
+      onresetvisibility={selectAllGames}
     />
   {:else}
     <div class="flex h-64 items-center justify-center">
-      <p class="text-lg text-gray-500">
+      <p class="text-lg text-muted">
         No data to display{allGameNames.length > 0
           ? " — try adjusting filters"
           : ""}
       </p>
     </div>
   {/if}
+
+  <!-- Bar Context Menu (derived from ContextMenu) -->
+  <ContextMenu
+    bind:show={barMenu.show}
+    x={barMenu.x}
+    y={barMenu.y}
+    title={barMenu.gameName}
+    onclose={closeBarMenu}
+  >
+    <button
+      class="ctx-item ctx-item-danger"
+      onclick={() => {
+        toggleGame(barMenu.gameName);
+        closeBarMenu();
+      }}
+    >
+      <span>👁️</span>
+      <span>Hide Game</span>
+    </button>
+  </ContextMenu>
+
+  <!-- Heatmap Day Context Menu (derived from ContextMenu) -->
+  <ContextMenu
+    bind:show={dayMenu.show}
+    x={dayMenu.x}
+    y={dayMenu.y}
+    title={dayMenu.dateStr ? `📅 ${formatDate(parseISO(dayMenu.dateStr), "EEE, MMM d, yyyy")}` : undefined}
+    minWidth="14rem"
+    onclose={closeDayMenu}
+  >
+    {#if dayMenu.games.length === 0}
+      <div class="px-3 py-2 text-xs text-muted">
+        No games tracked
+      </div>
+    {:else if dayMenu.games.length === 1}
+      {@const g = dayMenu.games[0]}
+      <button
+        class="ctx-item"
+        onclick={() => handleAddCustomSession(dayMenu.dateStr, g)}
+      >
+        <span class="text-sm text-accent">➕</span>
+        <span>Add Custom Session</span>
+      </button>
+      <button
+        class="ctx-item"
+        onclick={() => handleRecalculateSession(dayMenu.dateStr, g)}
+      >
+        <span class="text-sm text-accent">↺</span>
+        <span>Recalculate</span>
+      </button>
+    {:else}
+      <div class="ctx-section-title">
+        <span class="text-accent">➕</span> Add Custom Session:
+      </div>
+      {#each dayMenu.games as g}
+        <button
+          class="ctx-item pl-5 truncate"
+          onclick={() => handleAddCustomSession(dayMenu.dateStr, g)}
+        >
+          <span class="text-[10px] text-muted">•</span>
+          <span class="truncate">{g.name}</span>
+        </button>
+      {/each}
+
+      <div class="ctx-divider"></div>
+
+      <div class="ctx-section-title">
+        <span class="text-accent">↺</span> Recalculate:
+      </div>
+      {#each dayMenu.games as g}
+        <button
+          class="ctx-item pl-5 truncate"
+          onclick={() => handleRecalculateSession(dayMenu.dateStr, g)}
+        >
+          <span class="text-[10px] text-muted">•</span>
+          <span class="truncate">{g.name}</span>
+        </button>
+      {/each}
+    {/if}
+  </ContextMenu>
+
+  <!-- Period Header Context Menu (derived from ContextMenu) -->
+  <ContextMenu
+    bind:show={periodMenu.show}
+    x={periodMenu.x}
+    y={periodMenu.y}
+    title={`Per ${periodMenu.period}`}
+    minWidth="12rem"
+    onclose={closePeriodMenu}
+  >
+    <button
+      class="ctx-item justify-between"
+      onclick={() => saveDefaultPeriod(periodMenu.period)}
+    >
+      <div class="flex items-center gap-2">
+        <span class="text-sm text-accent">💾</span>
+        <span>Save choice</span>
+      </div>
+      {#if savedDefaultPeriod === periodMenu.period}
+        <span class="text-xs text-emerald-400 font-bold ml-auto">✓</span>
+      {/if}
+    </button>
+  </ContextMenu>
 </div>
 
 <style global lang="postcss">
@@ -1474,7 +3033,8 @@
   @tailwind utilities;
 
   body {
-    @apply bg-slate-800;
+    background: var(--exs-backdrop, #1e293b);
+    color: var(--exs-text, #94a3b8);
   }
 
   body.no-animations *,
@@ -1484,31 +3044,77 @@
     transition: none !important;
   }
 
+  #top_bar {
+    background: color-mix(in srgb, var(--exs-backdrop) 85%, transparent);
+    backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--exs-border, transparent);
+  }
+
   .header-text {
     @apply inline-flex items-center text-4xl;
+    color: var(--exs-title, #818cf8);
   }
 
   .header-icon {
-    @apply h-full;
+    @apply h-full cursor-pointer;
+    color: var(--exs-title, #818cf8);
   }
   .header-icon:hover {
-    @apply bg-hover text-icon;
+    background: var(--exs-accent-hover, #4338ca);
+    color: var(--exs-icon, #ffffff);
+  }
+
+  /* Utility classes */
+  .text-strong {
+    color: var(--exs-text-strong, #ffffff);
+  }
+  .text-sub {
+    color: var(--exs-text, #94a3b8);
+  }
+  .text-muted {
+    color: var(--exs-text-muted, #64748b);
+  }
+  .border-dim {
+    border-color: var(--exs-border, #334155);
   }
 
   /* Toolbar buttons */
   .toolbar-btn {
-    @apply cursor-pointer rounded bg-slate-700 px-3 py-1 text-sm text-gray-300;
+    @apply cursor-pointer rounded px-3 py-1 text-sm;
+    background: var(--exs-menu-bg, #334155);
+    color: var(--exs-menu-text, #d1d5db);
+    border: 1px solid var(--exs-border, transparent);
+    transition: all 0.15s ease;
   }
   .toolbar-btn:hover {
-    @apply bg-indigo-500 text-white;
+    background: var(--exs-accent, #818cf8);
+    color: #ffffff;
   }
   .toolbar-btn-active {
-    @apply bg-indigo-600 text-white;
+    background: var(--exs-accent, #818cf8);
+    color: #ffffff;
   }
 
   /* Panels */
   .panel {
-    @apply rounded-lg bg-slate-900 p-4;
+    @apply rounded-lg p-4;
+    background: var(--exs-block, #0f172a);
+    border: 1px solid var(--exs-border, #334155);
+  }
+  .panel-sub {
+    border-radius: 8px;
+    border: 1px solid var(--exs-border, #334155);
+    background: var(--exs-surface, #1e293b);
+    padding: 1rem;
+  }
+  .panel-input {
+    background: var(--exs-menu-bg, #334155);
+    color: var(--exs-text-strong, #ffffff);
+    border: 1px solid var(--exs-border, transparent);
+  }
+  .panel-input:focus {
+    border-color: var(--exs-accent, #818cf8);
+    outline: none;
   }
 
   /* Small buttons */
@@ -1516,16 +3122,19 @@
     @apply cursor-pointer rounded px-2 py-1 text-xs;
   }
   .btn-primary {
-    @apply bg-indigo-600 text-white;
+    background: var(--exs-btn-primary-bg, #4f46e5);
+    color: var(--exs-btn-primary-text, #ffffff);
   }
   .btn-primary:hover {
-    @apply bg-indigo-500;
+    background: var(--exs-accent-hover, #4338ca);
   }
   .btn-secondary {
-    @apply bg-slate-700 text-gray-300;
+    background: var(--exs-menu-bg, #334155);
+    color: var(--exs-menu-text, #d1d5db);
+    border: 1px solid var(--exs-border, transparent);
   }
   .btn-secondary:hover {
-    @apply bg-slate-600;
+    background: var(--exs-border, #475569);
   }
   .btn-danger {
     @apply bg-red-600 text-white;
@@ -1534,61 +3143,92 @@
     @apply bg-red-500;
   }
   .btn-danger-muted {
-    @apply bg-red-900 text-red-300;
+    background: rgba(239, 68, 68, 0.2);
+    color: #fca5a5;
   }
   .btn-danger-muted:hover {
-    @apply bg-red-800;
+    background: rgba(239, 68, 68, 0.35);
   }
   .btn-restore {
-    @apply bg-green-900 text-green-300;
+    background: rgba(34, 197, 94, 0.2);
+    color: #86efac;
   }
   .btn-restore:hover {
-    @apply bg-green-800;
+    background: rgba(34, 197, 94, 0.35);
   }
 
   /* Pills for filter */
   .pill {
     @apply flex cursor-pointer items-center gap-1.5 rounded-full px-3 py-1 text-sm;
+    transition: all 0.15s ease;
   }
   .pill-active {
-    @apply bg-indigo-600 text-white;
+    background: var(--exs-accent, #818cf8);
+    color: #ffffff;
   }
   .pill-inactive {
-    @apply bg-slate-700 text-gray-400;
+    background: var(--exs-menu-bg, #334155);
+    color: var(--exs-text-muted, #94a3b8);
+    border: 1px solid var(--exs-border, transparent);
   }
 
   /* Game rows */
   .game-row {
-    @apply flex items-center justify-between rounded bg-slate-800 px-3 py-2;
+    @apply flex items-center justify-between rounded px-3 py-2;
+    background: var(--exs-surface, #1e293b);
+    border: 1px solid var(--exs-border, transparent);
   }
   .game-row-deleted {
-    @apply border border-slate-700 bg-opacity-50;
+    border: 1px solid var(--exs-border, #334155);
+    opacity: 0.6;
   }
 
   /* Type badge */
   .type-badge {
-    @apply rounded bg-slate-700 px-1.5 py-0.5 uppercase;
+    @apply rounded px-1.5 py-0.5 uppercase;
     font-size: 10px;
-    color: #9ca3af;
+    background: var(--exs-menu-bg, #334155);
+    color: var(--exs-text-muted, #9ca3af);
   }
 
   /* Rename input */
   .rename-input {
-    @apply flex-1 rounded border border-indigo-500 bg-slate-700 px-2 py-1 text-sm text-white outline-none;
+    @apply flex-1 rounded px-2 py-1 text-sm outline-none;
+    background: var(--exs-menu-bg, #334155);
+    color: var(--exs-text-strong, #ffffff);
+    border: 1px solid var(--exs-accent, #818cf8);
+  }
+
+  /* Activity & Streak Section */
+  .activity-section {
+    background: var(--exs-chart-bg, #0f172a);
+    border: 1px solid var(--exs-border, transparent);
+    border-radius: 12px;
+    box-shadow: var(--exs-section-shadow, none);
+  }
+
+  /* Stat divider */
+  .stat-divider {
+    height: 1px;
+    width: 100%;
+    background-color: var(--exs-border, rgba(51, 65, 85, 0.5));
+    margin: 0.75rem 0;
   }
 
   /* ---- Stat Cards ---- */
   .stats-wrap {
-    background: #0f172a;
+    background: var(--exs-chart-bg, #0f172a);
+    border: 1px solid var(--exs-border, transparent);
     border-radius: 12px;
     padding: 16px 20px 14px;
     width: 100%;
+    box-shadow: var(--exs-section-shadow, none);
   }
   .stats-title {
     text-align: center;
     font-size: 1.3rem;
     font-weight: 700;
-    color: #818cf8;
+    color: var(--exs-title, #818cf8);
     margin: 0 0 4px;
     font-family: "Outfit", sans-serif;
   }
@@ -1605,7 +3245,7 @@
     border: none;
     border-radius: 8px;
     padding: 5px 16px;
-    color: #818cf8;
+    color: var(--exs-accent, #818cf8);
     font-size: 0.75rem;
     font-family: inherit;
     font-weight: 400;
@@ -1614,10 +3254,10 @@
     letter-spacing: 0.01em;
   }
   .stats-tab:hover {
-    color: #fff;
+    color: var(--exs-text-strong, #fff);
   }
   :global(.stats-tab-active) {
-    background: #818cf8 !important;
+    background: var(--exs-accent, #818cf8) !important;
     color: #fff !important;
     font-weight: 500 !important;
   }
@@ -1630,14 +3270,14 @@
     font-size: 0.6rem;
     letter-spacing: 0.2em;
     text-transform: uppercase;
-    color: #818cf8;
+    color: var(--exs-title, #818cf8);
     font-family: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Monaco,
       Consolas, monospace;
   }
   .stats-line {
     flex: 1;
     height: 1px;
-    background: #3e36b4;
+    background: var(--exs-border, #334155);
   }
 
   .stats-grid {
@@ -1652,8 +3292,8 @@
   }
 
   .stat-card {
-    background: #6d78d2;
-    border: 1px solid #3e36b4;
+    background: var(--exs-card-bg, #6d78d2);
+    border: 1px solid var(--exs-card-border, #3e36b4);
     border-radius: 10px;
     padding: 20px 24px 16px;
     position: relative;
@@ -1662,7 +3302,7 @@
     flex-direction: column;
   }
   .stat-card-highlight {
-    border-color: #4c1d95;
+    border-color: var(--exs-card-border, #4c1d95);
   }
   .stat-card-accent-bar {
     position: absolute;
@@ -1670,14 +3310,14 @@
     left: 0;
     right: 0;
     height: 2px;
-    background: #3e36b4;
+    background: var(--exs-card-line, #3e36b4);
   }
 
   .stat-label {
     font-size: 1.1rem;
     letter-spacing: 0.1em;
     text-transform: uppercase;
-    color: black;
+    color: var(--exs-card-text, black);
     font-family: "Outfit", sans-serif;
     font-weight: 600;
     margin-bottom: 8px;
@@ -1687,7 +3327,7 @@
     font-size: 2.3rem;
     font-weight: 600;
     font-family: "Outfit", sans-serif;
-    color: black;
+    color: var(--exs-card-text, black);
     letter-spacing: -0.03em;
     line-height: 1;
     margin-bottom: 6px;
@@ -1697,13 +3337,205 @@
     font-size: 3rem;
   }
   .stat-value-accent {
-    color: black;
+    color: var(--exs-card-text, black);
   }
 
   .stat-sub {
     font-size: 1.1rem;
-    color: black;
+    color: var(--exs-card-text, black);
     font-family: "Outfit", sans-serif;
     font-weight: 500;
+  }
+
+  .stat-card-selected {
+    outline: 2px solid var(--exs-accent) !important;
+    outline-offset: 2px !important;
+  }
+
+  .leaderboard-row-selected {
+    outline: 2px solid var(--exs-accent) !important;
+    outline-offset: 1px !important;
+  }
+
+  .best-list-card {
+    background: var(--exs-surface, #1e293b);
+    border: 1px solid var(--exs-border, #334155);
+  }
+
+  /* ── Leaderboard cards / rows ─────────────────────────────── */
+  .leaderboard-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    padding: 8px 12px;
+    border-radius: 9px;
+    border: 1px solid transparent;
+    text-align: left;
+    cursor: pointer;
+    position: relative;
+    overflow: hidden;
+    transition: transform 0.15s ease, filter 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+  }
+  .leaderboard-row:hover {
+    transform: translateY(-1px);
+    filter: brightness(1.07);
+    border-color: var(--exs-card-border, #3e36b4);
+  }
+
+  /* ── Rank 1 (Best Place): EXACT same color as reading summary cards ── */
+  .leaderboard-row.rank-1 {
+    background: var(--exs-card-bg, #6d78d2);
+    border-color: var(--exs-card-border, #3e36b4);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+  }
+  .leaderboard-row.rank-1 .lb-medal {
+    font-size: 1.35rem;
+  }
+  .leaderboard-row.rank-1 .lb-label {
+    font-size: 0.82rem;
+    font-weight: 700;
+    color: var(--exs-card-text, black);
+  }
+  .leaderboard-row.rank-1 .lb-secondary {
+    font-size: 0.68rem;
+    color: color-mix(in srgb, var(--exs-card-text, black) 65%, transparent);
+    font-weight: 500;
+  }
+  .leaderboard-row.rank-1 .lb-value {
+    font-size: 1.05rem;
+    font-weight: 800;
+    color: var(--exs-card-text, black);
+  }
+
+  /* ── Rank 2: a little dimmer (~78% card color) ── */
+  .leaderboard-row.rank-2 {
+    background: color-mix(in srgb, var(--exs-card-bg, #6d78d2) 78%, var(--exs-surface, #1e293b));
+    border-color: color-mix(in srgb, var(--exs-card-border, #3e36b4) 75%, transparent);
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12);
+  }
+  .leaderboard-row.rank-2 .lb-medal {
+    font-size: 1.2rem;
+  }
+  .leaderboard-row.rank-2 .lb-label {
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--exs-card-text, black);
+  }
+  .leaderboard-row.rank-2 .lb-secondary {
+    font-size: 0.68rem;
+    color: color-mix(in srgb, var(--exs-card-text, black) 65%, transparent);
+    font-weight: 500;
+  }
+  .leaderboard-row.rank-2 .lb-value {
+    font-size: 0.95rem;
+    font-weight: 750;
+    color: var(--exs-card-text, black);
+  }
+
+  /* ── Rank 3: dimmer (~52% card color) ── */
+  .leaderboard-row.rank-3 {
+    background: color-mix(in srgb, var(--exs-card-bg, #6d78d2) 52%, var(--exs-surface, #1e293b));
+    border-color: color-mix(in srgb, var(--exs-card-border, #3e36b4) 50%, transparent);
+  }
+  .leaderboard-row.rank-3 .lb-medal {
+    font-size: 1.1rem;
+  }
+  .leaderboard-row.rank-3 .lb-label {
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: var(--exs-text-strong, #ffffff);
+  }
+  .leaderboard-row.rank-3 .lb-secondary {
+    font-size: 0.68rem;
+    color: var(--exs-text-muted);
+  }
+  .leaderboard-row.rank-3 .lb-value {
+    font-size: 0.88rem;
+    font-weight: 700;
+    color: var(--exs-text-strong, #ffffff);
+  }
+
+  /* ── Rank 4: dimmer (~28% card color) ── */
+  .leaderboard-row.rank-4 {
+    background: color-mix(in srgb, var(--exs-card-bg, #6d78d2) 28%, var(--exs-surface, #1e293b));
+    border-color: color-mix(in srgb, var(--exs-card-border, #3e36b4) 30%, transparent);
+  }
+  .leaderboard-row.rank-4 .lb-medal {
+    font-size: 0.9rem;
+  }
+  .leaderboard-row.rank-4 .lb-label {
+    font-size: 0.76rem;
+    font-weight: 500;
+    color: var(--exs-text);
+  }
+  .leaderboard-row.rank-4 .lb-secondary {
+    font-size: 0.66rem;
+    color: var(--exs-text-muted);
+  }
+  .leaderboard-row.rank-4 .lb-value {
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: var(--exs-text);
+  }
+
+  /* ── Rank 5: dimmest (~12% card color) ── */
+  .leaderboard-row.rank-5 {
+    background: color-mix(in srgb, var(--exs-card-bg, #6d78d2) 12%, var(--exs-surface, #1e293b));
+    border-color: color-mix(in srgb, var(--exs-card-border, #3e36b4) 15%, transparent);
+    opacity: 0.88;
+  }
+  .leaderboard-row.rank-5 .lb-medal {
+    font-size: 0.85rem;
+  }
+  .leaderboard-row.rank-5 .lb-label {
+    font-size: 0.75rem;
+    font-weight: 500;
+    color: var(--exs-text-muted);
+  }
+  .leaderboard-row.rank-5 .lb-secondary {
+    font-size: 0.65rem;
+    color: color-mix(in srgb, var(--exs-text-muted) 75%, transparent);
+  }
+  .leaderboard-row.rank-5 .lb-value {
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: var(--exs-text-muted);
+  }
+
+  .lb-medal {
+    min-width: 1.6rem;
+    text-align: center;
+    flex-shrink: 0;
+    font-family: "Outfit", monospace;
+    font-weight: 700;
+    color: var(--exs-text-muted);
+  }
+
+  .lb-body {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    flex: 1;
+    min-width: 0;
+  }
+
+  .lb-label {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .lb-secondary {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .lb-value {
+    font-family: "Outfit", monospace;
+    white-space: nowrap;
+    flex-shrink: 0;
+    text-align: right;
   }
 </style>

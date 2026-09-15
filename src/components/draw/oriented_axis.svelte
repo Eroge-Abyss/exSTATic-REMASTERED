@@ -136,14 +136,14 @@
 
       // Style tick labels
       const texts = select(axis).selectAll("text");
-      texts.style("fill", "#64748b");
+      texts.style("fill", "var(--exs-text-muted, #64748b)");
 
       // Band scales (bar charts): horizontal, wrap long names
       if (position === "bottom" && !("invert" in scale)) {
         texts
           .style("text-anchor", "middle")
           .style("font-size", "10px")
-          .style("fill", "#94a3b8")
+          .style("fill", "var(--exs-text, #94a3b8)")
           .attr("dy", "0.8em")
           .each(function () {
             const el = select(this);
@@ -175,14 +175,14 @@
   transform="translate({transform})"
 />
 {#if position === "top"}
-  <text x={(width + margin) / 2} y={30} fill="#64748b" font-size="11"
+  <text x={(width + margin) / 2} y={30} fill="var(--exs-text-muted, #64748b)" font-size="11"
     >{label}</text
   >
 {:else if position === "right"}
   <text
     x={(height + margin) * -0.5}
     y={width - 10}
-    fill="#64748b"
+    fill="var(--exs-text-muted, #64748b)"
     font-size="11"
     transform="rotate(-90)">{label}</text
   >
@@ -190,14 +190,14 @@
   <text
     x={(width + margin) / 2}
     y={height - margin + 40}
-    fill="#64748b"
+    fill="var(--exs-text-muted, #64748b)"
     font-size="11">{label}</text
   >
 {:else if position === "left"}
   <text
     x={(height + margin) * -0.5}
     y={margin - 42}
-    fill="#64748b"
+    fill="var(--exs-text-muted, #64748b)"
     font-size="11"
     transform="rotate(-90)">{label}</text
   >

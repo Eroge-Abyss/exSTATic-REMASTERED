@@ -72,17 +72,17 @@
     gap: 6px;
     min-height: 32px;
     padding: 4px 12px;
-    border: 1px solid #1e1b4b;
+    border: 1px solid var(--exs-border, #1e1b4b);
     border-radius: 16px;
     background: transparent;
-    color: #64748b;
+    color: var(--exs-text, #64748b);
     font-size: 0.75rem;
     font-family: inherit;
     cursor: pointer;
     transition: all 0.15s ease;
   }
   .lg-pill:hover {
-    color: #e2e8f0;
+    color: var(--exs-text-strong, #e2e8f0);
     border-color: var(--pill-color);
   }
   :global(.lg-pill-active) {
@@ -92,11 +92,11 @@
       transparent
     ) !important;
     border-color: var(--pill-color) !important;
-    color: #e2e8f0 !important;
+    color: var(--exs-text-strong, #e2e8f0) !important;
   }
   :global(.lg-pill-hovered) {
     border-color: var(--pill-color) !important;
-    color: #cbd5e1 !important;
+    color: var(--exs-text-strong, #cbd5e1) !important;
     background: rgba(255, 255, 255, 0.03) !important;
   }
   :global(.lg-pill-dimmed) {

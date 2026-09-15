@@ -46,14 +46,20 @@ function messagingDisconnected(port_: Runtime.Port) {
   }
 }
 
-export async function dataFetched(event: MessageEvent) {
-  console.log(event);
-  const listen_status = (await browser.storage.local.get("listen_status"))[
-    "listen_status"
-  ];
-  if (listen_status === false) {
-    return;
+// Cache listen_status so dataFetched doesn't block on storage.get every message.
+// Defaults to true (active) until the stored value is read back.
+let listen_status_cached = true;
+browser.storage.local.get("listen_status").then((r) => {
+  listen_status_cached = r["listen_status"] ?? true;
+});
+browser.storage.onChanged.addListener((changes, area) => {
+  if (area === "local" && "listen_status" in changes) {
+    listen_status_cached = changes["listen_status"].newValue ?? true;
   }
+});
+
+export function dataFetched(event: MessageEvent) {
+  if (listen_status_cached === false) return;
 
   // Start by getting a timestamp for accuracy
   const time = timeNowSeconds();
@@ -83,7 +89,7 @@ export async function dataFetched(event: MessageEvent) {
     .slice(Math.max(0, path_segments.length - 3))
     .join("/");
 
-  await port?.postMessage({
+  port?.postMessage({
     line: line,
     process_path: process_path,
     original_process_path: data["process_path"],

@@ -2,7 +2,7 @@
   import { range, extent } from "d3-array";
   import { scaleLinear, scaleBand } from "d3-scale";
 
-  import { getDay, getWeek } from "date-fns";
+  import { getDay, getWeek, setWeek, setDay, startOfYear, format as formatDate } from "date-fns";
   import Bars from "../draw/bars.svelte";
   import Popup, {
     type TooltipAccessors,
@@ -21,6 +21,13 @@
     highlight_start?: string;
     highlight_end?: string;
     highlight_dates?: Set<string>;
+    // Selectable mode
+    selectable?: boolean;
+    selectedDates?: Set<string>;
+    onDateToggle?: (dateStr: string, action: "add" | "remove") => void;
+    onDayClick?: (dateStr: string) => void;
+    onDayContextMenu?: (dateStr: string, x: number, y: number) => void;
+    viewYear?: number;
   }
 
   let {
@@ -33,6 +40,12 @@
     highlight_start,
     highlight_end,
     highlight_dates,
+    selectable = false,
+    selectedDates = new Set(),
+    onDateToggle,
+    onDayClick,
+    onDayContextMenu,
+    viewYear = new Date().getFullYear(),
   }: Props = $props();
 
   let [height, width, margin] = $state([1000, 1200, 10]);
@@ -94,6 +107,80 @@
 
   let mouse_move: (event: MouseEvent) => void = $state(() => {});
   let mouse_out: () => void = $state(() => {});
+
+  // ---- Selectable mode ----
+  let isDragging = $state(false);
+  // dragAction: during a drag we always add (pointer may start on an unselected cell)
+  let dragAction: "add" | "remove" = "add";
+  let lastDragCell = $state<string | null>(null);
+
+  /** Convert (week, day) grid coords → ISO date string for viewYear */
+  function cellToDateStr(week: number, day: number): string | null {
+    try {
+      // setWeek sets the week number; setDay sets the day-of-week
+      const yearBase = startOfYear(new Date(viewYear, 0, 1));
+      const withWeek = setWeek(yearBase, week, { weekStartsOn: 0 });
+      const withDay = setDay(withWeek, day, { weekStartsOn: 0 });
+      // Only include dates that actually belong to viewYear
+      if (withDay.getFullYear() !== viewYear) return null;
+      return formatDate(withDay, "yyyy-MM-dd");
+    } catch {
+      return null;
+    }
+  }
+
+  function handleCellPointerDown(e: PointerEvent, week: number, day: number) {
+    if (!selectable || !onDateToggle) return;
+    if (e.button !== 0) return;
+    e.preventDefault();
+    const dateStr = cellToDateStr(week, day);
+    if (!dateStr) return;
+
+    isDragging = true;
+    // Determine action based on current state of clicked cell
+    if (selectedDates.has(dateStr)) {
+      dragAction = "remove";
+      onDateToggle(dateStr, "remove");
+    } else {
+      dragAction = "add";
+      onDateToggle(dateStr, "add");
+    }
+    lastDragCell = dateStr;
+
+    window.addEventListener("pointermove", handleWindowPointerMove);
+    window.addEventListener("pointerup", handleWindowPointerUp);
+  }
+
+  function handleCellPointerEnter(week: number, day: number) {
+    if (!isDragging || !selectable || !onDateToggle) return;
+    const dateStr = cellToDateStr(week, day);
+    if (!dateStr || dateStr === lastDragCell) return;
+
+    const alreadyInAction =
+      dragAction === "add" ? selectedDates.has(dateStr) : !selectedDates.has(dateStr);
+    if (!alreadyInAction) {
+      onDateToggle(dateStr, dragAction);
+    }
+    lastDragCell = dateStr;
+  }
+
+  function handleWindowPointerMove(e: PointerEvent) {
+    if (!isDragging) return;
+    // Hit-test the element under the pointer to find which cell it is
+    const el = document.elementFromPoint(e.clientX, e.clientY);
+    if (!el) return;
+    const weekStr = (el as SVGElement).dataset?.week;
+    const dayStr = (el as SVGElement).dataset?.day;
+    if (weekStr === undefined || dayStr === undefined) return;
+    handleCellPointerEnter(Number(weekStr), Number(dayStr));
+  }
+
+  function handleWindowPointerUp() {
+    isDragging = false;
+    lastDragCell = null;
+    window.removeEventListener("pointermove", handleWindowPointerMove);
+    window.removeEventListener("pointerup", handleWindowPointerUp);
+  }
 </script>
 
 <div class="flex h-full w-full flex-col items-center">
@@ -114,17 +201,26 @@
       viewBox="0 0 {new_width} {new_height}"
       preserveAspectRatio="xMidYMid meet"
     >
-      <!-- svelte-ignore a11y_mouse_events_have_key_events -->
+      <!-- Background grid cells -->
       {#each range(53) as week_num}
         {#each range(7) as day_num}
+          {@const dateStr = cellToDateStr(week_num, day_num)}
+          <!-- svelte-ignore a11y_no_static_element_interactions -->
           <rect
             x={x_scale(week_num.toString())}
             y={y_scale(day_num.toString())}
             height={y_scale.bandwidth()}
             width={x_scale.bandwidth()}
-            fill="silver"
-            fill-opacity="0.1"
+            fill="var(--exs-heatmap-empty, #e2e8f0)"
+            fill-opacity="1"
             stroke-width="3"
+            style={dateStr ? "cursor: pointer;" : "pointer-events: none;"}
+            oncontextmenu={(e) => {
+              if (dateStr && onDayContextMenu) {
+                e.preventDefault();
+                onDayContextMenu(dateStr, e.clientX, e.clientY);
+              }
+            }}
           />
         {/each}
       {/each}
@@ -134,7 +230,7 @@
           y={y_scale(day_num?.toString()) ?? "" + y_scale.bandwidth() / 2}
           height={y_scale.bandwidth()}
           width={x_scale.bandwidth()}
-          fill="white"
+          fill="var(--exs-text-muted, #94a3b8)"
           class="text-[0.6rem]"
           dominant-baseline="middle"
         >
@@ -154,7 +250,60 @@
         {highlight_start}
         {highlight_end}
         {highlight_dates}
+        onclick={(d) => {
+          if (!selectable && d.date && onDayClick) {
+            onDayClick(d.date);
+          }
+        }}
+        oncontextmenu={(d, e) => {
+          if (d.date && onDayContextMenu) {
+            e.preventDefault();
+            onDayContextMenu(d.date, e.clientX, e.clientY);
+          }
+        }}
       />
+
+      <!-- Selectable overlay — LAST in SVG so it sits above Bars and captures all pointer events -->
+      {#if selectable}
+        {#each range(53) as week_num}
+          {#each range(7) as day_num}
+            {@const dateStr = cellToDateStr(week_num, day_num)}
+            {@const isSelected = dateStr !== null && selectedDates.has(dateStr)}
+            {#if isSelected}
+              <rect
+                x={x_scale(week_num.toString())}
+                y={y_scale(day_num.toString())}
+                height={y_scale.bandwidth()}
+                width={x_scale.bandwidth()}
+                fill="#2dd4bf"
+                fill-opacity="0.5"
+                stroke="#2dd4bf"
+                stroke-width="1.5"
+                rx="2"
+                style="pointer-events: none;"
+              />
+            {/if}
+            <!-- svelte-ignore a11y_no_static_element_interactions -->
+            <rect
+              x={x_scale(week_num.toString())}
+              y={y_scale(day_num.toString())}
+              height={y_scale.bandwidth()}
+              width={x_scale.bandwidth()}
+              fill="transparent"
+              data-week={week_num}
+              data-day={day_num}
+              style="cursor: pointer;"
+              onpointerdown={(e) => handleCellPointerDown(e, week_num, day_num)}
+              oncontextmenu={(e) => {
+                if (dateStr && onDayContextMenu) {
+                  e.preventDefault();
+                  onDayContextMenu(dateStr, e.clientX, e.clientY);
+                }
+              }}
+            />
+          {/each}
+        {/each}
+      {/if}
     </svg>
 
     <Popup

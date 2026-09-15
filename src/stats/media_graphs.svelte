@@ -20,6 +20,9 @@
     tooltip_formatters: TooltipFormatters;
     color_overrides?: Record<string, string>;
     oncolorchange?: (group: string, color: string) => void;
+    onbarcontextmenu?: (name: string, x: number, y: number) => void;
+    hiddenCount?: number;
+    onresetvisibility?: () => void;
   }
 
   let {
@@ -32,6 +35,9 @@
     tooltip_formatters,
     color_overrides = {},
     oncolorchange,
+    onbarcontextmenu,
+    hiddenCount = 0,
+    onresetvisibility,
   }: Props = $props();
 
   // Convert time from seconds to hours
@@ -83,4 +89,8 @@
   ontabchange={(i) => (activeTab = i)}
   {color_overrides}
   {oncolorchange}
+  {onbarcontextmenu}
+  {hiddenCount}
+  {onresetvisibility}
 />
+

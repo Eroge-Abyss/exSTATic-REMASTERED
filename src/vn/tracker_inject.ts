@@ -27,10 +27,26 @@ const setup = async () => {
         return;
       }
 
-      await vn_storage.changeInstance(undefined, data["process_path"]);
-      await vn_storage.addLine(data["line"], data["date"], data["time"]);
+      try {
+        await vn_storage.changeInstance(undefined, data["process_path"]);
+        await vn_storage.addLine(data["line"], data["date"], data["time"]);
+      } catch (e: any) {
+        const isQuota =
+          e?.name === "QuotaExceededError" ||
+          (typeof e?.message === "string" && e.message.includes("QUOTA_BYTES"));
+        if (isQuota) {
+          console.warn(
+            "exSTATic: storage quota exceeded — line was not saved. " +
+            "Export and clear old line data to free space.",
+          );
+        } else {
+          console.error("exSTATic: failed to add line:", e);
+        }
+        return;
+      }
 
       const timeRead = vn_storage.instance_storage?.today_stats.time_read;
+
       if (timeRead) {
         const delta = timeRead - (prevTime || timeRead);
         const charsRead = await vn_storage.instance_storage?.getTotalCharsRead();
@@ -40,6 +56,13 @@ const setup = async () => {
     });
   };
   connectMessaging();
+
+  // Keep the background service worker alive — Chrome MV3 suspends it after
+  // ~30s of idle causing a ~400ms wakeup delay on the next line.
+  // Pinging every 25s via the existing port resets the idle timer.
+  setInterval(() => {
+    try { port.postMessage({ ping: true }); } catch { /* port may briefly disconnect on reconnect */ }
+  }, 25000);
 
   // Tadoku status: event-driven, fires immediately on connect/disconnect
   tadoku.onStatusChange((connected) => {
