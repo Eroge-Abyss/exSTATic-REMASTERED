@@ -81,11 +81,34 @@
     scaleBand().domain(range(7).map(String)).padding(0.1).range(y_range),
   );
 
+  let themeTick = $state(0);
+
+  $effect(() => {
+    const handler = () => {
+      themeTick++;
+    };
+    window.addEventListener("exs-theme-changed", handler);
+    return () => {
+      window.removeEventListener("exs-theme-changed", handler);
+    };
+  });
+
   let colorScale = $derived.by(() => {
+    void themeTick;
     const color_extent = extent(data, metric_accessor);
-    return color_extent[0] !== undefined && color_extent[1] !== undefined
-      ? scaleLinear<string>().domain(color_extent).range(["#818cf8", "#4338ca"])
-      : undefined;
+    if (color_extent[0] === undefined || color_extent[1] === undefined) {
+      return undefined;
+    }
+    let lo = "#818cf8";
+    let hi = "#4338ca";
+    if (typeof window !== "undefined" && typeof document !== "undefined") {
+      const style = getComputedStyle(document.documentElement);
+      const customLo = style.getPropertyValue("--exs-heatmap-lo").trim();
+      const customHi = style.getPropertyValue("--exs-heatmap-hi").trim();
+      if (customLo) lo = customLo;
+      if (customHi) hi = customHi;
+    }
+    return scaleLinear<string>().domain(color_extent).range([lo, hi]);
   });
 
   const [xGet, yGet] = [

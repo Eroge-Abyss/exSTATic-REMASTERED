@@ -436,7 +436,7 @@
   }
   :global(.sp-btn-on) {
     background: var(--exs-accent, #818cf8) !important;
-    color: #fff !important;
+    color: var(--exs-accent-text, #ffffff) !important;
     font-weight: 500 !important;
     box-shadow: 0 0 16px rgba(129, 140, 248, 0.4) !important;
   }
@@ -475,7 +475,7 @@
   }
   :global(.sp-tab-active) {
     background: var(--exs-accent, #818cf8) !important;
-    color: #fff !important;
+    color: var(--exs-accent-text, #ffffff) !important;
     font-weight: 500 !important;
     box-shadow: 0 0 16px rgba(129, 140, 248, 0.4) !important;
   }

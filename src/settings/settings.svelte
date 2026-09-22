@@ -6,7 +6,7 @@
   import * as browser from "webextension-polyfill";
   import { onMount } from "svelte";
   import { applyTheme, setTheme } from "../themes/apply_theme";
-  import type { ThemeId } from "../themes/themes";
+  import { themeList, type ThemeId } from "../themes/themes";
 
   let type = $state("vn");
   let disableAnimations = $state(false);
@@ -149,34 +149,22 @@
     />
   {:else if type === "global"}
     <div class="menu-label text-xl">Theme</div>
-    <div class="menu-input flex items-center justify-end gap-3 p-4">
-      <button
-        class="flex items-center gap-2 rounded-lg px-4 py-2 font-medium transition-all {currentTheme === 'dark'
-          ? 'bg-button text-white ring-2 ring-white/50'
-          : 'bg-backdrop text-text hover:text-white'}"
-        onclick={() => handleThemeChange("dark")}
-      >
-        <span class="inline-block h-3.5 w-3.5 rounded-full bg-slate-900 border border-slate-500"></span>
-        Dark
-      </button>
-      <button
-        class="flex items-center gap-2 rounded-lg px-4 py-2 font-medium transition-all {currentTheme === 'white'
-          ? 'bg-button text-white ring-2 ring-indigo-500/50'
-          : 'bg-backdrop text-text hover:text-white'}"
-        onclick={() => handleThemeChange("white")}
-      >
-        <span class="inline-block h-3.5 w-3.5 rounded-full bg-white border border-slate-300"></span>
-        White
-      </button>
-      <button
-        class="flex items-center gap-2 rounded-lg px-4 py-2 font-medium transition-all {currentTheme === 'black'
-          ? 'bg-button text-white ring-2 ring-zinc-500/50'
-          : 'bg-backdrop text-text hover:text-white'}"
-        onclick={() => handleThemeChange("black")}
-      >
-        <span class="inline-block h-3.5 w-3.5 rounded-full border border-zinc-700" style="background-color: #070614;"></span>
-        Black
-      </button>
+    <div class="menu-input flex flex-wrap items-center justify-end gap-2.5 p-4">
+      {#each themeList as theme}
+        <button
+          class="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-all {currentTheme === theme.id
+            ? 'bg-button ring-2 ring-white/40'
+            : 'bg-backdrop text-text hover:text-white'}"
+          style={currentTheme === theme.id ? 'color: var(--exs-accent-text, #ffffff);' : ''}
+          onclick={() => handleThemeChange(theme.id)}
+        >
+          <span
+            class="inline-block h-3.5 w-3.5 rounded-full border shadow-sm"
+            style="background: linear-gradient(135deg, {theme.background} 50%, {theme.primary} 50%); border-color: {theme.accent};"
+          ></span>
+          {theme.name}
+        </button>
+      {/each}
     </div>
 
     <div class="menu-label text-xl">Disable Dashboard Animations</div>
@@ -200,9 +188,11 @@
   @tailwind components;
   @tailwind utilities;
 
+  html,
   body {
     background: var(--exs-backdrop, #1e293b);
     color: var(--exs-text, #94a3b8);
+    color-scheme: dark;
   }
 
   #top_bar {

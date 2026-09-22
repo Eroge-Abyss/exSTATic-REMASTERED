@@ -1,5 +1,9 @@
 console.log("Injected");
 
+import { applyThemeSync, applyTheme } from "../themes/apply_theme";
+applyThemeSync();
+applyTheme();
+
 import { VNStorage } from "../vn/vn_storage";
 import { MokuroStorage } from "../mokuro/mokuro_storage";
 import { TTUStorage } from "../ttu/ttu_storage";

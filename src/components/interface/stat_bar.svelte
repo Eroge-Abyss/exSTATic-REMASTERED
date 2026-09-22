@@ -74,7 +74,7 @@
   });
 </script>
 
-<div class="menu-bar z-50 flex h-full flex-row items-center gap-3 p-3">
+<div class="menu-bar z-50 flex h-full flex-row items-center gap-3 p-3 text-black" style="color: #000000;">
   <div id="chars_read" class="stat-numbers">{chars}</div>
   <div class="stat-annotation">Chars</div>
   <span class="material-icons">auto_stories</span>

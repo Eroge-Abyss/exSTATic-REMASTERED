@@ -39,6 +39,7 @@
         "file:///*/exSTATic/*/tracker.html",
         "file:///*/fjiikigkdpahddfcembbapebejanfnhf/*/tracker.html"
       ],
+      "run_at": "document_start",
       "js": [
         "vn/tracker_inject.js",
         "fonts.js"
@@ -84,6 +85,7 @@
         "file:///*/exSTATic/*/stats.html",
         "file:///*/fjiikigkdpahddfcembbapebejanfnhf/*/stats.html"
       ],
+      "run_at": "document_start",
       "js": [
         "stats/stats_inject.js",
         "fonts.js"
@@ -99,6 +101,7 @@
         "file:///*/exSTATic/*/settings.html",
         "file:///*/fjiikigkdpahddfcembbapebejanfnhf/*/settings.html"
       ],
+      "run_at": "document_start",
       "js": [
         "settings/settings_inject.js",
         "fonts.js"

@@ -1,5 +1,6 @@
 <script lang="ts">
   import Line from "./line.svelte";
+  import ContextMenu from "./context_menu.svelte";
   import { tick } from "svelte";
 
   interface Props {
@@ -13,94 +14,76 @@
 
   $effect.pre(() => {
     if (!entry_holder || lines.length === 0) return;
-
     tick().then(() => window.scrollTo(0, entry_holder?.scrollHeight ?? 0));
   });
 
-  // Drag-select state
-  let isDragging = $state(false);
-  let dragAction: boolean = true; // true = check, false = uncheck
-  let lastToggled: HTMLInputElement | null = null;
-
-  function onPointerDown(e: PointerEvent) {
-    const target = e.target as HTMLElement;
-    if (!target.classList.contains("line-select")) return;
-
-    // Prevent default so the browser won't toggle the checkbox via the click
-    // event that follows — we toggle it manually here instead.
-    e.preventDefault();
-    isDragging = true;
-    const checkbox = target as HTMLInputElement;
-    dragAction = !checkbox.checked;
-    checkbox.checked = dragAction;
-    checkbox.dispatchEvent(new Event("change", { bubbles: true }));
-    lastToggled = checkbox;
-
-    window.addEventListener("pointermove", onPointerMove);
-    window.addEventListener("pointerup", onPointerUp);
-  }
-
-  function onPointerMove(e: PointerEvent) {
-    if (!isDragging) return;
-
-    const el = document.elementFromPoint(e.clientX, e.clientY);
-    if (!el) return;
-
-    const entry = el.closest(".sentence-entry");
-    if (!entry) return;
-
-    const checkbox = entry.querySelector(".line-select") as HTMLInputElement | null;
-    if (!checkbox || checkbox === lastToggled || checkbox.checked === dragAction) return;
-
-    checkbox.checked = dragAction;
-    checkbox.dispatchEvent(new Event("change", { bubbles: true }));
-    lastToggled = checkbox;
-  }
-
-  function onPointerUp() {
-    isDragging = false;
-    lastToggled = null;
-    window.removeEventListener("pointermove", onPointerMove);
-    window.removeEventListener("pointerup", onPointerUp);
-  }
+  // Context menu state
+  let showMenu = $state(false);
+  let menuX = $state(0);
+  let menuY = $state(0);
 
   function onContainerClick(e: MouseEvent) {
-    // Always fire the parent's onclick (e.g. close menu).
     onclick?.();
 
     const target = e.target as HTMLElement;
 
-    if (target.classList.contains("line-select")) {
-      // pointerdown already toggled this checkbox and dispatched change.
-      // Prevent the browser's own click default, which would toggle it again.
-      e.preventDefault();
-      return;
-    }
+    // Only respond to clicks directly on the checkbox, not the whole row.
+    if (!target.classList.contains("line-select")) return;
 
-    // If the user dragged to highlight text (Yomichan / copy), don't toggle.
-    const selection = window.getSelection();
-    if (selection && selection.toString().trim().length > 0) return;
+    // The browser already toggled checked; just fire change so listeners pick it up.
+    target.dispatchEvent(new Event("change", { bubbles: true }));
+  }
 
-    // Clicking anywhere on a sentence row also toggles that line's checkbox.
-    const entry = target.closest(".sentence-entry");
-    if (!entry) return;
 
-    const checkbox = entry.querySelector(".line-select") as HTMLInputElement | null;
-    if (checkbox) {
-      checkbox.checked = !checkbox.checked;
-      checkbox.dispatchEvent(new Event("change", { bubbles: true }));
+  function onContainerContextMenu(e: MouseEvent) {
+    const target = e.target as HTMLElement;
+    if (!target.classList.contains("line-select")) return;
+
+    e.preventDefault();
+    menuX = e.clientX;
+    menuY = e.clientY;
+    showMenu = true;
+  }
+
+  function batchSelect() {
+    showMenu = false;
+    if (!entry_holder) return;
+
+    const checkboxes = Array.from(
+      entry_holder.querySelectorAll<HTMLInputElement>(".line-select"),
+    );
+
+    const checkedIndices = checkboxes
+      .map((cb, i) => (cb.checked ? i : -1))
+      .filter((i) => i !== -1);
+
+    if (checkedIndices.length < 2) return;
+
+    const min = Math.min(...checkedIndices);
+    const max = Math.max(...checkedIndices);
+
+    for (let i = min; i <= max; i++) {
+      if (!checkboxes[i].checked) {
+        checkboxes[i].checked = true;
+        checkboxes[i].dispatchEvent(new Event("change", { bubbles: true }));
+      }
     }
   }
 </script>
+
+<ContextMenu bind:show={showMenu} x={menuX} y={menuY} title="Selection">
+  <button class="ctx-item" onclick={batchSelect}>
+    ⬛ Batch Select
+  </button>
+</ContextMenu>
 
 <div
   id="entry_holder"
   bind:this={entry_holder}
   role="presentation"
-  style:user-select={isDragging ? 'none' : 'auto'}
   onclick={onContainerClick}
+  oncontextmenu={onContainerContextMenu}
   {ondblclick}
-  onpointerdown={onPointerDown}
 >
   {#each lines as [_, id, line, time]}
     <Line {id} {time} sentence={line} />

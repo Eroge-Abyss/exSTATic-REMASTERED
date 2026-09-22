@@ -166,10 +166,15 @@
     const res = await browser.storage.local.get("default_period");
     if (res.default_period && (PERIODS as readonly string[]).includes(res.default_period)) {
       savedDefaultPeriod = res.default_period as PeriodType;
-      selectedPeriod = res.default_period as PeriodType;
+      selectPeriod(res.default_period as PeriodType);
     }
   }
   loadDefaultPeriod();
+
+  /** Switch the Reading Summary period. Independent of the header year picker. */
+  function selectPeriod(p: PeriodType) {
+    selectedPeriod = p;
+  }
 
   // ---- Period Context Menu ----
   let periodMenu = $state<{
@@ -207,7 +212,7 @@
       await browser.storage.local.remove("default_period");
     } else {
       savedDefaultPeriod = p;
-      selectedPeriod = p;
+      selectPeriod(p);
       await browser.storage.local.set({ default_period: p });
     }
     closePeriodMenu();
@@ -1165,8 +1170,12 @@
       };
     }
 
-    // All Time (fallback)
-    let allData = statsBaseData;
+    // All Time — read directly from processedData so this is independent of
+    // the header year picker and the year-scoped selectedGames filter.
+    let allData = processedData
+      .filter((d) => mediaType === "all" || d.type === mediaType)
+      .filter((d) => !legendSelectedGroup || d.name === legendSelectedGroup);
+
     const activeDaysAll = new Set(allData.map((d) => d.date)).size;
     const totalChars = sum(allData, (d) => d.chars_read) || 0;
     const totalTime = sum(allData, (d) => d.time_read) || 0;
@@ -2149,7 +2158,7 @@
           <button
             class="stats-tab"
             class:stats-tab-active={selectedPeriod === p}
-            onclick={() => (selectedPeriod = p)}
+            onclick={() => selectPeriod(p)}
             oncontextmenu={(e) => handlePeriodContextMenu(p, e)}
           >
             Per {p}
@@ -3032,9 +3041,11 @@
   @tailwind components;
   @tailwind utilities;
 
+  html,
   body {
     background: var(--exs-backdrop, #1e293b);
     color: var(--exs-text, #94a3b8);
+    color-scheme: dark;
   }
 
   body.no-animations *,
@@ -3164,7 +3175,7 @@
   }
   .pill-active {
     background: var(--exs-accent, #818cf8);
-    color: #ffffff;
+    color: var(--exs-accent-text, #ffffff);
   }
   .pill-inactive {
     background: var(--exs-menu-bg, #334155);
@@ -3258,7 +3269,7 @@
   }
   :global(.stats-tab-active) {
     background: var(--exs-accent, #818cf8) !important;
-    color: #fff !important;
+    color: var(--exs-accent-text, #ffffff) !important;
     font-weight: 500 !important;
   }
 

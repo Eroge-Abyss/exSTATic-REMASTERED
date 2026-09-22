@@ -1,5 +1,9 @@
 console.log("Injected");
 
+import { applyThemeSync, applyTheme } from "../themes/apply_theme";
+applyThemeSync();
+applyTheme();
+
 import { getData } from "../data_wrangling/data_extraction";
 import Stats from "./stats.svelte";
 

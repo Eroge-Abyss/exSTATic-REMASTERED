@@ -1,6 +1,10 @@
 console.log("Injected");
 console.log("Kofta999's fork with Tadoku support");
 
+import { applyThemeSync, applyTheme } from "../themes/apply_theme";
+applyThemeSync();
+applyTheme();
+
 import * as browser from "webextension-polyfill";
 import { VNStorage } from "./vn_storage";
 import App from "./vn.svelte";

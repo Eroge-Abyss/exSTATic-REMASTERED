@@ -317,8 +317,10 @@
     border-style: none;
   }
 
+  html,
   body {
-    @apply bg-backdrop;
+    background-color: var(--exs-backdrop, #1e293b);
+    color-scheme: dark;
   }
 
   .jp-text {
@@ -364,7 +366,8 @@
   }
 
   .menu-bar {
-    @apply flex h-full items-center gap-3 p-3 hover:filter-none;
+    @apply flex h-full items-center gap-3 p-3 text-black hover:filter-none;
+    color: #000000;
     background: color-mix(in srgb, var(--exs-accent) 70%, transparent);
     filter: blur(var(--default-menu-blur));
   }
