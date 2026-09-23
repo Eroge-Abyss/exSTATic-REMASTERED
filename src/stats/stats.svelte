@@ -68,6 +68,36 @@
 
   const SECS_TO_HRS = 60 * 60;
 
+  export function safeParseDate(val: unknown): Date | null {
+    if (!val) return null;
+    if (val instanceof Date) return isNaN(val.getTime()) ? null : val;
+    if (typeof val === "number") {
+      const d = new Date(val);
+      return isNaN(d.getTime()) ? null : d;
+    }
+    if (typeof val === "string") {
+      const trimmed = val.trim();
+      if (!trimmed) return null;
+      const iso = parseISO(trimmed);
+      if (!isNaN(iso.getTime())) return iso;
+      const fallback = new Date(trimmed.replace(/\//g, "-"));
+      if (!isNaN(fallback.getTime())) return fallback;
+      const direct = new Date(trimmed);
+      if (!isNaN(direct.getTime())) return direct;
+    }
+    return null;
+  }
+
+  export function safeFormatDate(date: unknown, pattern: string, fallback = ""): string {
+    const d = safeParseDate(date);
+    if (!d) return fallback;
+    try {
+      return formatDate(d, pattern);
+    } catch {
+      return fallback;
+    }
+  }
+
   interface Props {
     data: DataEntry[];
   }
@@ -75,7 +105,9 @@
   let { data: initialData }: Props = $props();
 
   // Reactive data that can be refreshed after delete/restore
-  let data = $state(initialData);
+  let data = $state(
+    (initialData ?? []).filter((d) => safeParseDate(d?.date) !== null),
+  );
   let deletedGames = $state<
     { uuid: string; name: string; type: string; deleted_at: string }[]
   >([]);
@@ -87,9 +119,13 @@
     refreshTimer = setTimeout(async () => {
       const fresh = await getData();
       if (fresh) {
-        data = fresh.sort(
-          (a, b) => parseISO(a["date"]).valueOf() - parseISO(b["date"]).valueOf()
-        );
+        data = fresh
+          .filter((d) => safeParseDate(d?.date) !== null)
+          .sort(
+            (a, b) =>
+              (safeParseDate(a["date"])?.valueOf() ?? 0) -
+              (safeParseDate(b["date"])?.valueOf() ?? 0),
+          );
       }
     }, 300);
   });
@@ -206,7 +242,8 @@
     }
 
     if (!enableAllTimeView) {
-      const startYear = parseISO(sortedStart).getFullYear();
+      const parsedStart = safeParseDate(sortedStart);
+      const startYear = parsedStart ? parsedStart.getFullYear() : new Date().getFullYear();
       if (getYear(selectedYearStart) !== startYear) {
         selectedYearStart = new Date(startYear, 0, 1);
       }
@@ -438,9 +475,13 @@
   async function refreshData() {
     const newData = await getData();
     data =
-      newData?.sort(
-        (a, b) => parseISO(a.date).valueOf() - parseISO(b.date).valueOf(),
-      ) ?? [];
+      (newData ?? [])
+        .filter((d) => safeParseDate(d?.date) !== null)
+        .sort(
+          (a, b) =>
+            (safeParseDate(a.date)?.valueOf() ?? 0) -
+            (safeParseDate(b.date)?.valueOf() ?? 0),
+        );
     await loadDeletedGames();
     await loadAllInstances();
   }
@@ -710,7 +751,10 @@
   const currentTime = new Date();
   const currentYearStart = startOfYear(currentTime);
   const earliestStart = $derived(
-    min(processedData, (d) => parseISO(d.date)) ?? currentTime,
+    min(
+      processedData.map((d) => safeParseDate(d.date)).filter((d): d is Date => d !== null),
+      (d) => d,
+    ) ?? currentTime,
   );
 
   let selectedYearStart = $state(currentYearStart);
@@ -728,11 +772,14 @@
   let yearMediaData = $derived(
     (enableAllTimeView
       ? processedData
-      : processedData.filter(
-          (d) =>
-            selectedYearStart <= parseISO(d.date) &&
-            parseISO(d.date) <= selectedYearEnd,
-        )
+      : processedData.filter((d) => {
+          const p = safeParseDate(d.date);
+          return (
+            p !== null &&
+            selectedYearStart <= p &&
+            p <= selectedYearEnd
+          );
+        })
     ).filter((d) => mediaType === "all" || d.type === mediaType),
   );
 
@@ -779,10 +826,13 @@
     const datesInYear = processedData
       .filter((d) => mediaType === "all" || d.type === mediaType)
       .filter((d) => selectedGames.has(d.name))
-      .filter((d) => getYear(parseISO(d.date)) === newYear);
+      .filter((d) => {
+        const p = safeParseDate(d.date);
+        return p !== null && getYear(p) === newYear;
+      });
 
     if (datesInYear.length > 0) {
-      const maxTime = max(datesInYear, (d) => parseISO(d.date).getTime());
+      const maxTime = max(datesInYear, (d) => safeParseDate(d.date)?.getTime() ?? 0);
       if (maxTime) targetDate = new Date(maxTime);
     }
 
@@ -792,7 +842,7 @@
       .filter((d) => mediaType === "all" || d.type === mediaType)
       .filter((d) => selectedGames.has(d.name));
     if (allValidDates.length > 0) {
-      const bMaxTime = max(allValidDates, (d) => parseISO(d.date).getTime());
+      const bMaxTime = max(allValidDates, (d) => safeParseDate(d.date)?.getTime() ?? 0);
       if (bMaxTime) bDate = new Date(bMaxTime);
     }
 
@@ -872,7 +922,7 @@
   );
 
   const name_accessor = (d: Partial<DataEntry>) => d.name!;
-  const date_accessor = (d: Partial<DataEntry>) => parseISO(d.date!);
+  const date_accessor = (d: Partial<DataEntry>) => safeParseDate(d.date!) ?? new Date();
   const chars_read_accessor = (d: Partial<DataEntry>) => d.chars_read!;
   const time_read_accessor = (d: Partial<DataEntry>) => d.time_read!;
   const read_speed_accessor = (d: Partial<DataEntry>) =>
@@ -943,15 +993,19 @@
       totalSecs > 0 ? Math.round((totalChars / totalSecs) * 3600) : 0;
 
     // Span in calendar days (at least 1)
-    const dates = statsFilteredData.map((d) => parseISO(d.date));
-    const earliest =
-      dates.length > 0
-        ? new Date(Math.min(...dates.map((d) => d.getTime())))
-        : new Date();
-    const latest =
-      dates.length > 0
-        ? new Date(Math.max(...dates.map((d) => d.getTime())))
-        : new Date();
+    const dates = statsFilteredData
+      .map((d) => safeParseDate(d.date))
+      .filter((d): d is Date => d !== null);
+    const earliestMs = dates.reduce(
+      (m, d) => Math.min(m, d.getTime()),
+      dates[0]?.getTime() ?? Date.now(),
+    );
+    const latestMs = dates.reduce(
+      (m, d) => Math.max(m, d.getTime()),
+      dates[0]?.getTime() ?? Date.now(),
+    );
+    const earliest = new Date(earliestMs);
+    const latest = new Date(latestMs);
     const spanDays = Math.max(1, differenceInDays(latest, earliest) + 1);
 
     const charsPerDay =
@@ -989,7 +1043,8 @@
     const uniqueDaySet = new Set(statsFilteredData.map((d) => d.date));
     if (uniqueDaySet.size > 0) {
       const sortedAsc = Array.from(uniqueDaySet)
-        .map((d) => ({ time: parseISO(d).getTime(), dateStr: d }))
+        .map((d) => ({ time: safeParseDate(d)?.getTime() ?? NaN, dateStr: d }))
+        .filter((d) => !isNaN(d.time))
         .sort((a, b) => a.time - b.time);
 
       let run = 1;
@@ -1100,7 +1155,7 @@
   let baseDate = $derived.by(() => {
     let bDate = new Date();
     if (baseData.length > 0) {
-      const maxTime = max(baseData, (d) => parseISO(d.date).getTime());
+      const maxTime = max(baseData, (d) => safeParseDate(d.date)?.getTime() ?? 0);
       if (maxTime) bDate = new Date(maxTime);
     }
     return bDate;
@@ -1134,7 +1189,8 @@
       return { count: 0, start: null as string | null, end: null as string | null };
     }
     const sortedAsc = Array.from(uniqueDaySet)
-      .map((d) => ({ time: parseISO(d).getTime(), dateStr: d }))
+      .map((d) => ({ time: safeParseDate(d)?.getTime() ?? NaN, dateStr: d }))
+      .filter((d) => !isNaN(d.time))
       .sort((a, b) => a.time - b.time);
     let best = 1;
     let bestStart = sortedAsc[0].dateStr;
@@ -1261,14 +1317,16 @@
 
   let periodData = $derived.by(() => {
     if (selectedPeriod === "Custom" && customPeriodStart && customPeriodEnd) {
-      const sDate = parseISO(customPeriodStart);
-      const eDate = parseISO(customPeriodEnd);
-      let customData = statsBaseData.filter((d) => {
-        const dDate = parseISO(d.date);
-        return dDate >= sDate && dDate <= eDate;
-      });
+      const sDate = safeParseDate(customPeriodStart);
+      const eDate = safeParseDate(customPeriodEnd);
+      let customData = (sDate && eDate)
+        ? statsBaseData.filter((d) => {
+            const dDate = safeParseDate(d.date);
+            return dDate !== null && dDate >= sDate && dDate <= eDate;
+          })
+        : [];
       const activeDaysCustom = new Set(customData.map((d) => d.date)).size;
-      const computedSpan = Math.max(1, differenceInDays(eDate, sDate) + 1);
+      const computedSpan = (sDate && eDate) ? Math.max(1, differenceInDays(eDate, sDate) + 1) : 1;
       const totalChars = sum(customData, (d) => d.chars_read) || 0;
       const totalTime = sum(customData, (d) => d.time_read) || 0;
 
@@ -1293,8 +1351,8 @@
         periodEnd: customPeriodEnd,
         totalLabel:
           customPeriodStart === customPeriodEnd
-            ? formatDate(sDate, "MMM d, yyyy")
-            : `${formatDate(sDate, "MMM d")} - ${formatDate(eDate, "MMM d, yyyy")}`,
+            ? safeFormatDate(sDate, "MMM d, yyyy")
+            : `${safeFormatDate(sDate, "MMM d")} - ${safeFormatDate(eDate, "MMM d, yyyy")}`,
         spanDays: computedSpan,
         ...getSessionExtremes(customData),
       };
@@ -1302,7 +1360,9 @@
 
     if (selectedPeriod === "Week") {
       let weeklyData = statsBaseData.filter((d) => {
-        const diff = differenceInDays(refDate, parseISO(d.date));
+        const dDate = safeParseDate(d.date);
+        if (!dDate) return false;
+        const diff = differenceInDays(refDate, dDate);
         return diff >= 0 && diff <= 6;
       });
       const activeDaysWeek = new Set(weeklyData.map((d) => d.date)).size;
@@ -1325,21 +1385,22 @@
         totalChars,
         totalTime,
         totalTitles: new Set(weeklyData.map((d) => d.name)).size,
-        periodStart: formatDate(subDays(refDate, 6), "yyyy-MM-dd"),
-        periodEnd: formatDate(refDate, "yyyy-MM-dd"),
+        periodStart: safeFormatDate(subDays(refDate, 6), "yyyy-MM-dd"),
+        periodEnd: safeFormatDate(refDate, "yyyy-MM-dd"),
         totalLabel:
-          formatDate(subDays(refDate, 6), "MMM d") +
+          safeFormatDate(subDays(refDate, 6), "MMM d") +
           " - " +
-          formatDate(refDate, "MMM d, yyyy"),
+          safeFormatDate(refDate, "MMM d, yyyy"),
         spanDays: 7,
         ...getSessionExtremes(weeklyData),
       };
     }
 
     if (selectedPeriod === "Month") {
-      let monthlyData = statsBaseData.filter((d) =>
-        isSameMonth(parseISO(d.date), refDate),
-      );
+      let monthlyData = statsBaseData.filter((d) => {
+        const dDate = safeParseDate(d.date);
+        return dDate !== null && isSameMonth(dDate, refDate);
+      });
       const activeDaysMonth = new Set(monthlyData.map((d) => d.date)).size;
       const daysInMonth = new Date(
         refDate.getFullYear(),
@@ -1370,21 +1431,22 @@
         totalChars,
         totalTime,
         totalTitles: new Set(monthlyData.map((d) => d.name)).size,
-        periodStart: formatDate(monthStart, "yyyy-MM-dd"),
-        periodEnd: formatDate(
+        periodStart: safeFormatDate(monthStart, "yyyy-MM-dd"),
+        periodEnd: safeFormatDate(
           new Date(refDate.getFullYear(), refDate.getMonth() + 1, 0),
           "yyyy-MM-dd",
         ),
-        totalLabel: formatDate(refDate, "MMM yyyy"),
+        totalLabel: safeFormatDate(refDate, "MMM yyyy"),
         spanDays: computedSpan,
         ...getSessionExtremes(monthlyData),
       };
     }
 
     if (selectedPeriod === "Year") {
-      let yearlyData = statsBaseData.filter((d) =>
-        isSameYear(parseISO(d.date), refDate),
-      );
+      let yearlyData = statsBaseData.filter((d) => {
+        const dDate = safeParseDate(d.date);
+        return dDate !== null && isSameYear(dDate, refDate);
+      });
       const activeDaysYear = new Set(yearlyData.map((d) => d.date)).size;
       const isLeapYear =
         new Date(refDate.getFullYear(), 1, 29).getMonth() === 1;
@@ -1413,12 +1475,12 @@
         totalChars,
         totalTime,
         totalTitles: new Set(yearlyData.map((d) => d.name)).size,
-        periodStart: formatDate(yearStart, "yyyy-MM-dd"),
-        periodEnd: formatDate(
+        periodStart: safeFormatDate(yearStart, "yyyy-MM-dd"),
+        periodEnd: safeFormatDate(
           new Date(refDate.getFullYear(), 11, 31),
           "yyyy-MM-dd",
         ),
-        totalLabel: formatDate(refDate, "yyyy"),
+        totalLabel: safeFormatDate(refDate, "yyyy"),
         spanDays: computedSpan,
         ...getSessionExtremes(yearlyData),
       };
@@ -1434,15 +1496,19 @@
     const totalChars = sum(allData, (d) => d.chars_read) || 0;
     const totalTime = sum(allData, (d) => d.time_read) || 0;
 
-    const dates = allData.map((d) => parseISO(d.date));
-    const earliest =
-      dates.length > 0
-        ? new Date(Math.min(...dates.map((d) => d.getTime())))
-        : new Date();
-    const latest =
-      dates.length > 0
-        ? new Date(Math.max(...dates.map((d) => d.getTime())))
-        : new Date();
+    const dates = allData
+      .map((d) => safeParseDate(d.date))
+      .filter((d): d is Date => d !== null);
+    const earliestMs = dates.reduce(
+      (m, d) => Math.min(m, d.getTime()),
+      dates[0]?.getTime() ?? Date.now(),
+    );
+    const latestMs = dates.reduce(
+      (m, d) => Math.max(m, d.getTime()),
+      dates[0]?.getTime() ?? Date.now(),
+    );
+    const earliest = new Date(earliestMs);
+    const latest = new Date(latestMs);
     const spanDays = Math.max(1, differenceInDays(latest, earliest) + 1);
     const streakAll = getLocalStreak(allData);
 
@@ -1461,8 +1527,8 @@
       totalChars,
       totalTime,
       totalTitles: new Set(allData.map((d) => d.name)).size,
-      periodStart: formatDate(earliest, "yyyy-MM-dd"),
-      periodEnd: formatDate(latest, "yyyy-MM-dd"),
+      periodStart: safeFormatDate(earliest, "yyyy-MM-dd"),
+      periodEnd: safeFormatDate(latest, "yyyy-MM-dd"),
       totalLabel: "All Time",
       spanDays,
       ...getSessionExtremes(allData),
@@ -1734,41 +1800,48 @@
     } else {
       // All Time
       if (detailGranularity === "Year") {
-        const allDates = statsFilteredData.map((d) => parseISO(d.date));
+        const allDates = statsFilteredData
+          .map((d) => safeParseDate(d.date))
+          .filter((d): d is Date => d !== null);
         const minY =
           allDates.length > 0
-            ? Math.min(...allDates.map((d) => d.getFullYear()))
+            ? allDates.reduce((m, d) => Math.min(m, d.getFullYear()), allDates[0].getFullYear())
             : new Date().getFullYear();
         const maxY =
           allDates.length > 0
-            ? Math.max(...allDates.map((d) => d.getFullYear()))
+            ? allDates.reduce((m, d) => Math.max(m, d.getFullYear()), allDates[0].getFullYear())
             : new Date().getFullYear();
         for (let y = minY; y <= maxY; y++) {
           buckets.push({
             label: String(y),
-            filterFn: (entry) => parseISO(entry.date).getFullYear() === y,
+            filterFn: (entry) => safeParseDate(entry.date)?.getFullYear() === y,
           });
         }
       } else {
-        const allDates = statsFilteredData.map((d) => parseISO(d.date));
-        const minD =
+        const allDates = statsFilteredData
+          .map((d) => safeParseDate(d.date))
+          .filter((d): d is Date => d !== null);
+        const minMs =
           allDates.length > 0
-            ? new Date(Math.min(...allDates.map((d) => d.getTime())))
-            : new Date();
-        const maxD =
+            ? allDates.reduce((m, d) => Math.min(m, d.getTime()), allDates[0].getTime())
+            : Date.now();
+        const maxMs =
           allDates.length > 0
-            ? new Date(Math.max(...allDates.map((d) => d.getTime())))
-            : new Date();
+            ? allDates.reduce((m, d) => Math.max(m, d.getTime()), allDates[0].getTime())
+            : Date.now();
+        const minD = new Date(minMs);
+        const maxD = new Date(maxMs);
         const months = eachMonthOfInterval({
           start: startOfMonth(minD),
           end: endOfMonth(maxD),
         });
         for (const m of months) {
           buckets.push({
-            label: formatDate(m, "MMM yy"),
-            filterFn: (entry) =>
-              isSameMonth(parseISO(entry.date), m) &&
-              isSameYear(parseISO(entry.date), m),
+            label: safeFormatDate(m, "MMM yy"),
+            filterFn: (entry) => {
+              const p = safeParseDate(entry.date);
+              return p !== null && isSameMonth(p, m) && isSameYear(p, m);
+            },
           });
         }
       }
@@ -1823,7 +1896,7 @@
         date,
         periodStart: date,
         periodEnd: date,
-        label: formatDate(parseISO(date), "EEE, MMM d, yyyy"),
+        label: safeFormatDate(date, "EEE, MMM d, yyyy"),
         chars,
         time,
         speed,
@@ -1847,17 +1920,19 @@
   let bestWeeks = $derived.by(() => {
     const weekMap = new Map<string, typeof statsBaseData>();
     for (const d of statsBaseData) {
-      const wStart = formatDate(
-        startOfWeek(parseISO(d.date), { weekStartsOn: 0 }),
+      const pDate = safeParseDate(d.date);
+      if (!pDate) continue;
+      const wStart = safeFormatDate(
+        startOfWeek(pDate, { weekStartsOn: 0 }),
         "yyyy-MM-dd"
       );
       if (!weekMap.has(wStart)) weekMap.set(wStart, []);
       weekMap.get(wStart)!.push(d);
     }
     const list = Array.from(weekMap.entries()).map(([wStart, entries]) => {
-      const wStartDate = parseISO(wStart);
+      const wStartDate = safeParseDate(wStart) ?? new Date();
       const wEndDate = addDays(wStartDate, 6);
-      const wEnd = formatDate(wEndDate, "yyyy-MM-dd");
+      const wEnd = safeFormatDate(wEndDate, "yyyy-MM-dd");
       const chars = sum(entries, (e) => e.chars_read) || 0;
       const time = sum(entries, (e) => e.time_read) || 0;
       const activeDays = new Set(entries.map((e) => e.date)).size;
@@ -1868,7 +1943,7 @@
       return {
         periodStart: wStart,
         periodEnd: wEnd,
-        label: `${formatDate(wStartDate, "MMM d")} - ${formatDate(wEndDate, "MMM d, yyyy")}`,
+        label: `${safeFormatDate(wStartDate, "MMM d")} - ${safeFormatDate(wEndDate, "MMM d, yyyy")}`,
         chars,
         time,
         speed,
@@ -1900,10 +1975,10 @@
       monthMap.get(mKey)!.push(d);
     }
     const list = Array.from(monthMap.entries()).map(([mKey, entries]) => {
-      const mStartDate = parseISO(`${mKey}-01`);
+      const mStartDate = safeParseDate(`${mKey}-01`) ?? new Date();
       const mEndDate = endOfMonth(mStartDate);
-      const mStart = formatDate(mStartDate, "yyyy-MM-dd");
-      const mEnd = formatDate(mEndDate, "yyyy-MM-dd");
+      const mStart = safeFormatDate(mStartDate, "yyyy-MM-dd");
+      const mEnd = safeFormatDate(mEndDate, "yyyy-MM-dd");
       const chars = sum(entries, (e) => e.chars_read) || 0;
       const time = sum(entries, (e) => e.time_read) || 0;
       const activeDays = new Set(entries.map((e) => e.date)).size;
@@ -1914,7 +1989,7 @@
       return {
         periodStart: mStart,
         periodEnd: mEnd,
-        label: formatDate(mStartDate, "MMMM yyyy"),
+        label: safeFormatDate(mStartDate, "MMMM yyyy"),
         chars,
         time,
         speed,
@@ -1951,7 +2026,7 @@
       return;
     }
 
-    const targetDate = parseISO(item.periodEnd);
+    const targetDate = safeParseDate(item.periodEnd) ?? new Date();
     customHighlightStart = item.periodStart;
     customHighlightEnd = item.periodEnd;
 
@@ -3764,7 +3839,7 @@
     bind:show={dayMenu.show}
     x={dayMenu.x}
     y={dayMenu.y}
-    title={dayMenu.dateStr ? formatDate(parseISO(dayMenu.dateStr), "EEE, MMM d, yyyy") : undefined}
+    title={dayMenu.dateStr ? safeFormatDate(dayMenu.dateStr, "EEE, MMM d, yyyy") : undefined}
     minWidth="14rem"
     onclose={closeDayMenu}
   >
@@ -3790,7 +3865,7 @@
           <line x1="8" y1="2" x2="8" y2="6"></line>
           <line x1="3" y1="10" x2="21" y2="10"></line>
         </svg>
-        <span>Select to {formatDate(parseISO(dayMenu.dateStr), "MMM d")}</span>
+        <span>Select to {safeFormatDate(dayMenu.dateStr, "MMM d")}</span>
       </button>
       <div class="ctx-divider"></div>
     {/if}

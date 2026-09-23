@@ -129,13 +129,19 @@ export async function getDateData(date: string): Promise<DataEntry[]> {
 export async function getData(): Promise<DataEntry[]> {
   const dates = await browser.storage.local.get("immersion_dates");
 
-  if (!dates.hasOwnProperty("immersion_dates")) {
+  if (!dates.hasOwnProperty("immersion_dates") || !Array.isArray(dates["immersion_dates"])) {
     return [];
   }
 
-  const data = await Promise.all(dates["immersion_dates"].map(getDateData));
+  const validDates = dates["immersion_dates"].filter(
+    (d: unknown) => typeof d === "string" && d.trim().length > 0,
+  );
 
-  return data.flat();
+  const data = await Promise.all(validDates.map(getDateData));
+
+  return data.flat().filter(
+    (entry) => entry && typeof entry.date === "string" && entry.date.trim().length > 0,
+  );
 }
 
 export async function getInstanceData([uuid, details]: [

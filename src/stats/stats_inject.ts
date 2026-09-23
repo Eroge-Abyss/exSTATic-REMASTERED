@@ -10,14 +10,33 @@ import Stats from "./stats.svelte";
 import { parseISO } from "date-fns";
 import { mount } from "svelte";
 
+function safeParseDate(val: unknown): Date | null {
+  if (!val) return null;
+  if (val instanceof Date) return isNaN(val.getTime()) ? null : val;
+  if (typeof val === "string") {
+    const trimmed = val.trim();
+    if (!trimmed) return null;
+    const iso = parseISO(trimmed);
+    if (!isNaN(iso.getTime())) return iso;
+    const fallback = new Date(trimmed.replace(/\//g, "-"));
+    if (!isNaN(fallback.getTime())) return fallback;
+    const direct = new Date(trimmed);
+    if (!isNaN(direct.getTime())) return direct;
+  }
+  return null;
+}
+
 const setup = async () => {
+  const rawData = await getData();
+  const validData = (rawData ?? []).filter((d) => safeParseDate(d?.date) !== null);
+
   mount(Stats, {
     target: document.documentElement,
     props: {
-      data: (await getData())?.sort(
+      data: validData.sort(
         (first, second) =>
-          parseISO(first["date"]).valueOf() -
-          parseISO(second["date"]).valueOf(),
+          (safeParseDate(first["date"])?.valueOf() ?? 0) -
+          (safeParseDate(second["date"])?.valueOf() ?? 0),
       ),
     },
   });

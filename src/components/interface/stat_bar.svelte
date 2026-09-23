@@ -31,9 +31,14 @@
       : 0;
 
   const getTime = (time_secs: number) => {
-    const date = new Date(0);
-    date.setSeconds(Math.round(time_secs));
-    return date.toISOString().substring(11, 19);
+    if (!time_secs || isNaN(time_secs) || time_secs < 0 || !isFinite(time_secs)) {
+      return "00:00:00";
+    }
+    const totalSecs = Math.round(time_secs);
+    const hrs = Math.floor(totalSecs / 3600);
+    const mins = Math.floor((totalSecs % 3600) / 60);
+    const secs = totalSecs % 60;
+    return `${hrs.toString().padStart(2, "0")}:${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
   };
 
   const getSpeed = (
