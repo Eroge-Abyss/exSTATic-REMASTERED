@@ -482,6 +482,7 @@
   // ---- Game Management ----
   let showGamePanel = $state(false);
   let showDeletedGames = $state(false);
+  let showMergeHistory = $state(false);
   let confirmDeleteUuid = $state<string | null>(null);
   let confirmPermanentDeleteUuid = $state<string | null>(null);
 
@@ -2207,7 +2208,7 @@
       </div>
 
       <!-- Active Games -->
-      <div class="space-y-1.5">
+      <div class="games-scroll-container space-y-1.5">
         {#each uniqueGames as game}
           <div class="game-row">
             <div class="flex min-w-0 flex-1 items-center gap-2.5">
@@ -2544,34 +2545,46 @@
       <!-- Merge History -->
       {#if mergeHistory.length > 0}
         <div class="mt-4 border-t border-dim pt-4">
-          <p class="mb-2 text-xs font-semibold uppercase tracking-widest text-muted">Merge History</p>
-          <div class="space-y-1.5">
-            {#each mergeHistory as snap}
-              <div class="game-row items-center">
-                <div class="flex min-w-0 flex-1 flex-col gap-0.5">
-                  <span class="truncate text-sm text-strong">
-                    <span class="text-accent">{snap.secondaryName}</span>
-                    <span class="text-muted mx-1">→</span>
-                    <span class="text-accent">{snap.primaryName}</span>
-                  </span>
-                  <span class="text-[10px] text-muted">
-                    {new Date(snap.timestamp).toLocaleString()}
-                  </span>
+          <button
+            class="flex items-center gap-2 text-sm font-semibold text-muted hover:text-strong transition-colors cursor-pointer"
+            onclick={() => (showMergeHistory = !showMergeHistory)}
+          >
+            <svg class="h-3.5 w-3.5 transition-transform duration-200 {showMergeHistory ? 'rotate-90 text-accent' : ''}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="9 18 15 12 9 6"></polyline>
+            </svg>
+            <span>Merge History</span>
+            <span class="count-badge">{mergeHistory.length}</span>
+          </button>
+
+          {#if showMergeHistory}
+            <div class="mt-3 space-y-1.5">
+              {#each mergeHistory as snap}
+                <div class="game-row items-center">
+                  <div class="flex min-w-0 flex-1 flex-col gap-0.5">
+                    <span class="truncate text-sm text-strong">
+                      <span class="text-accent">{snap.secondaryName}</span>
+                      <span class="text-muted mx-1">→</span>
+                      <span class="text-accent">{snap.primaryName}</span>
+                    </span>
+                    <span class="text-[10px] text-muted">
+                      {new Date(snap.timestamp).toLocaleString()}
+                    </span>
+                  </div>
+                  <button
+                    class="btn-sm btn-restore shrink-0"
+                    disabled={undoingMerge === snap.timestamp}
+                    onclick={() => handleUndoMerge(snap)}
+                  >
+                    <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                      <polyline points="1 4 1 10 7 10"></polyline>
+                      <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path>
+                    </svg>
+                    <span>{undoingMerge === snap.timestamp ? "Restoring…" : "Undo"}</span>
+                  </button>
                 </div>
-                <button
-                  class="btn-sm btn-restore shrink-0"
-                  disabled={undoingMerge === snap.timestamp}
-                  onclick={() => handleUndoMerge(snap)}
-                >
-                  <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-                    <polyline points="1 4 1 10 7 10"></polyline>
-                    <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path>
-                  </svg>
-                  <span>{undoingMerge === snap.timestamp ? "Restoring…" : "Undo"}</span>
-                </button>
-              </div>
-            {/each}
-          </div>
+              {/each}
+            </div>
+          {/if}
         </div>
       {/if}
     </div>
@@ -3929,6 +3942,26 @@
   .pill-inactive:hover {
     color: var(--exs-text-strong, #ffffff);
     border-color: var(--exs-accent, #818cf8);
+  }
+
+  /* Scrollable games list */
+  .games-scroll-container {
+    max-height: 360px;
+    overflow-y: auto;
+    padding-right: 4px;
+  }
+  .games-scroll-container::-webkit-scrollbar {
+    width: 6px;
+  }
+  .games-scroll-container::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .games-scroll-container::-webkit-scrollbar-thumb {
+    background: color-mix(in srgb, var(--exs-border, #475569) 80%, transparent);
+    border-radius: 9999px;
+  }
+  .games-scroll-container::-webkit-scrollbar-thumb:hover {
+    background: var(--exs-accent, #818cf8);
   }
 
   /* Game rows */
