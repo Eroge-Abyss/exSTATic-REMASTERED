@@ -34,6 +34,7 @@
     tabs?: { label: string }[];
     activeTab?: number;
     ontabchange?: (index: number) => void;
+    selectedGroup?: string | null;
     onselect?: (group: string | null) => void;
   }
 
@@ -53,6 +54,7 @@
     tabs,
     activeTab = 0,
     ontabchange,
+    selectedGroup = $bindable(null),
     onselect,
   }: Props = $props();
 
@@ -153,7 +155,6 @@
   let mouse_out: () => void = $state(() => {});
 
   // Interactive legend state
-  let selectedGroup = $state<string | null>(null);
   let hoveredGroup = $state<string | null>(null);
 
   function handleLegendSelect(grp: string | null) {
@@ -359,6 +360,7 @@
           {hoveredGroup}
           groupAccessor={(d) => c_accessor(d)}
           onbubblehover={handleBubbleHover}
+          onbubbleselect={handleLegendSelect}
           bind:mouse_move
           bind:mouse_out
         />

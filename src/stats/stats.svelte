@@ -2574,10 +2574,26 @@
             >{fmtChars($twTotalChars)}</span
           >
           <span class="stat-sub">{periodData.totalLabel}</span>
-          <span
-            class="absolute bottom-4 right-4 text-right font-mono text-[10px] uppercase tracking-wide text-black/40"
-            >{Math.round($twTotalTitles)} titles</span
-          >
+          {#if legendSelectedGroup}
+            <!-- svelte-ignore a11y_click_events_have_key_events -->
+            <!-- svelte-ignore a11y_no_static_element_interactions -->
+            <span
+              class="selected-game-title absolute bottom-4 right-4 max-w-[65%] truncate text-right font-mono text-[10px] tracking-wide cursor-pointer"
+              title="{legendSelectedGroup} (click to clear)"
+              onclick={(e) => {
+                e.stopPropagation();
+                legendSelectedGroup = null;
+              }}
+            >
+              {legendSelectedGroup}
+            </span>
+          {:else}
+            <span
+              class="absolute bottom-4 right-4 text-right font-mono text-[10px] uppercase tracking-wide text-black/40"
+            >
+              {Math.round($twTotalTitles)} titles
+            </span>
+          {/if}
 
           {#if activeSubPeriods.length > 0}
             <div class="stat-divider"></div>
@@ -3331,6 +3347,7 @@
       {tooltip_formatters}
       {color_overrides}
       oncolorchange={handleColorChange}
+      selectedGroup={legendSelectedGroup}
       onselect={(grp) => (legendSelectedGroup = grp)}
     />
     <MediaGraphs
@@ -3873,6 +3890,15 @@
   .stat-card :global(.text-black\/40) {
     color: var(--exs-card-text, #ffffff) !important;
     opacity: 0.55;
+  }
+  .stat-card :global(.selected-game-title) {
+    color: var(--exs-card-text, #ffffff) !important;
+    opacity: 0.85;
+    font-weight: 600;
+  }
+  .stat-card :global(.selected-game-title:hover) {
+    opacity: 1;
+    text-decoration: underline;
   }
   .stat-card :global(.hover\:bg-black\/5:hover) {
     background-color: color-mix(in srgb, var(--exs-card-text, #ffffff) 15%, transparent) !important;

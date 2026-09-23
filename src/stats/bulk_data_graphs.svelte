@@ -17,6 +17,7 @@
     tooltip_formatters: TooltipFormatters;
     color_overrides?: Record<string, string>;
     oncolorchange?: (group: string, color: string) => void;
+    selectedGroup?: string | null;
     onselect?: (group: string | null) => void;
   }
 
@@ -31,6 +32,7 @@
     tooltip_formatters,
     color_overrides = {},
     oncolorchange,
+    selectedGroup = null,
     onselect,
   }: Props = $props();
 
@@ -58,6 +60,7 @@
   y_label={activeYLabel}
   {color_overrides}
   {oncolorchange}
+  {selectedGroup}
   {onselect}
   {tabs}
   {activeTab}

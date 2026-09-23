@@ -16,6 +16,7 @@
     hoveredGroup?: string | null;
     groupAccessor?: (d: DataEntry) => string;
     onbubblehover?: (group: string | null) => void;
+    onbubbleselect?: (group: string | null) => void;
   }
 
   let {
@@ -32,6 +33,7 @@
     hoveredGroup = null,
     groupAccessor,
     onbubblehover,
+    onbubbleselect,
   }: Props = $props();
 
   let ready = $derived(
@@ -67,8 +69,12 @@
     return 0.8;
   }
 
-  function handleClick(index: number) {
+  function handleClick(d: DataEntry, index: number) {
     selectedIndex = selectedIndex === index ? null : index;
+    if (groupAccessor && onbubbleselect) {
+      const grp = groupAccessor(d);
+      onbubbleselect(selectedGroup === grp ? null : grp);
+    }
   }
 
   function handleMouseEnter(d: DataEntry, index: number) {
@@ -106,7 +112,7 @@
         handleMouseLeave();
       }}
       onmouseenter={() => handleMouseEnter(d, i)}
-      onclick={() => handleClick(i)}
+      onclick={() => handleClick(d, i)}
       style="transition: cx 0.5s cubic-bezier(0.2, 0.8, 0.2, 1), cy 0.5s cubic-bezier(0.2, 0.8, 0.2, 1), r 0.5s cubic-bezier(0.2, 0.8, 0.2, 1), fill 0.5s ease, fill-opacity 0.15s ease; cursor: pointer;"
     />
   {/each}
