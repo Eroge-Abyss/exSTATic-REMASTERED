@@ -19,6 +19,7 @@
     oncolorchange?: (group: string, color: string) => void;
     selectedGroup?: string | null;
     onselect?: (group: string | null) => void;
+    onbubblecontextmenu?: (d: DataEntry, event: MouseEvent) => void;
   }
 
   let {
@@ -34,6 +35,7 @@
     oncolorchange,
     selectedGroup = null,
     onselect,
+    onbubblecontextmenu,
   }: Props = $props();
 
   const tabs = [{ label: "Immersion Gains" }, { label: "Immersion Quantity" }];
@@ -62,6 +64,7 @@
   {oncolorchange}
   {selectedGroup}
   {onselect}
+  {onbubblecontextmenu}
   {tabs}
   {activeTab}
   ontabchange={(i) => (activeTab = i)}

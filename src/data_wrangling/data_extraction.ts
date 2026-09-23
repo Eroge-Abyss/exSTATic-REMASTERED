@@ -57,7 +57,7 @@ export async function getAllInstances(): Promise<
   const mediaRaw = await browser.storage.local.get('media');
   const media: Record<string, string> = mediaRaw['media'] ?? {};
   for (const uuid of Object.values(media)) allUuids.add(uuid);
-  const results: { uuid: string; name: string; type: string }[] = [];
+  const results: { uuid: string; name: string; type: string; vndb_id?: string }[] = [];
   for (const uuid of allUuids) {
     const raw = await browser.storage.local.get(uuid);
     const details = raw[uuid];
@@ -66,6 +66,7 @@ export async function getAllInstances(): Promise<
       uuid,
       name: details.name ?? details.given_identifier ?? uuid,
       type: details.type ?? 'vn',
+      vndb_id: details.vndb_id ?? '',
     });
   }
   return results.sort((a, b) => a.name.localeCompare(b.name));
@@ -118,6 +119,7 @@ export async function getDateData(date: string): Promise<DataEntry[]> {
       name: details["name"],
       given_identifier: details["given_identifier"],
       type: details["type"],
+      vndb_id: details["vndb_id"],
       date: date,
       ...stats_entry,
     };
@@ -374,6 +376,17 @@ export async function renameGame(
   const details = detailsRaw[uuid];
   if (!details) return;
   details.name = newName;
+  await browser.storage.local.set({ [uuid]: details });
+}
+
+export async function setGameVndbId(
+  uuid: string,
+  vndbId: string,
+): Promise<void> {
+  const detailsRaw = await browser.storage.local.get(uuid);
+  const details = detailsRaw[uuid];
+  if (!details) return;
+  details.vndb_id = vndbId.trim();
   await browser.storage.local.set({ [uuid]: details });
 }
 

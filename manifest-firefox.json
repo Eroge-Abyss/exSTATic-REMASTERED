@@ -30,7 +30,8 @@
     "https://ttu-ebook.web.app/**",
     "https://reader.ttsu.app/**",
     "file:///**/ttu-ebook.web.app/**",
-    "file:///**/reader.ttsu.app/**"
+    "file:///**/reader.ttsu.app/**",
+    "https://api.vndb.org/*"
   ],
   "content_security_policy": {
     "extension_pages": "script-src 'self'; object-src 'self'"

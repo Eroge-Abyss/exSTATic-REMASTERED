@@ -45,6 +45,7 @@
     getDeletedGames,
     permanentDeleteGame,
     renameGame,
+    setGameVndbId,
     getDuplicateGroups,
     mergeGames,
     undoMerge,
@@ -114,9 +115,13 @@
 
   // Refresh data in real time when storage changes
   let refreshTimer: ReturnType<typeof setTimeout> | undefined;
-  browser.storage.onChanged.addListener(() => {
+  browser.storage.onChanged.addListener((changes) => {
+    if (changes["muramasa_logging"]) {
+      muramasaLogging = !!changes["muramasa_logging"].newValue;
+    }
     clearTimeout(refreshTimer);
     refreshTimer = setTimeout(async () => {
+      await loadAllInstances();
       const fresh = await getData();
       if (fresh) {
         data = fresh
@@ -137,7 +142,7 @@
   loadDeletedGames();
 
   // All tracked instances (including those with no stats yet)
-  let allInstances = $state<{ uuid: string; name: string; type: string }[]>([]);
+  let allInstances = $state<{ uuid: string; name: string; type: string; vndb_id?: string }[]>([]);
   async function loadAllInstances() {
     allInstances = await getAllInstances();
   }
@@ -424,10 +429,244 @@
     if (dayMenu.show) dayMenu.show = false;
   }
 
+  // ---- Bubble / Session Context Menu ----
+  let sessionMenu = $state<{
+    show: boolean;
+    x: number;
+    y: number;
+    gameName: string;
+    uuid: string;
+    chars: number;
+    time: number;
+    dateStr: string;
+  }>({
+    show: false,
+    x: 0,
+    y: 0,
+    gameName: "",
+    uuid: "",
+    chars: 0,
+    time: 0,
+    dateStr: "",
+  });
+
+  function handleBubbleContextMenu(d: DataEntry, event: MouseEvent) {
+    if (!muramasaLogging) return;
+    event.preventDefault();
+    closeAllMenus();
+    const clampedX = Math.min(event.clientX, typeof window !== "undefined" ? window.innerWidth - 240 : event.clientX);
+    const clampedY = Math.min(event.clientY, typeof window !== "undefined" ? window.innerHeight - 200 : event.clientY);
+    sessionMenu = {
+      show: true,
+      x: Math.max(10, clampedX),
+      y: Math.max(10, clampedY),
+      gameName: (d.name ?? d.given_identifier ?? "Unknown").trim(),
+      uuid: d.uuid,
+      chars: d.chars_read ?? 0,
+      time: d.time_read ?? 0,
+      dateStr: d.date,
+    };
+  }
+
+  function closeSessionMenu() {
+    if (sessionMenu.show) sessionMenu.show = false;
+  }
+
   function closeAllMenus() {
     closeBarMenu();
     closeDayMenu();
     closePeriodMenu();
+    closeSessionMenu();
+  }
+
+  // ---- Muramasa Discord Logging & VNDB Integration ----
+  let muramasaLogging = $state(false);
+
+  async function loadMuramasaSetting() {
+    const res = await browser.storage.local.get("muramasa_logging");
+    muramasaLogging = !!res.muramasa_logging;
+  }
+  loadMuramasaSetting();
+
+  let gameVndbMap = $derived(
+    new Map(allInstances.map((i) => [i.uuid, i.vndb_id || ""]))
+  );
+
+  function getVndbIdForGame(uuid: string, name?: string): string {
+    const direct = gameVndbMap.get(uuid);
+    if (direct) return direct;
+    if (name) {
+      const found = allInstances.find(
+        (i) => (i.name ?? "").trim() === name.trim() && i.vndb_id
+      );
+      if (found?.vndb_id) return found.vndb_id;
+    }
+    return "";
+  }
+
+  function formatDurationMuramasa(seconds: number): string {
+    const s = Math.max(0, Math.round(seconds));
+    const hrs = Math.floor(s / 3600);
+    const mins = Math.floor((s % 3600) / 60);
+    const secs = s % 60;
+    const pad = (n: number) => String(n).padStart(2, "0");
+    return `${pad(hrs)}h${pad(mins)}m${pad(secs)}s`;
+  }
+
+  function buildMuramasaCommand(
+    gameName: string,
+    uuid: string,
+    chars: number,
+    durationSecs: number,
+    dateStr: string,
+  ): string {
+    let vndbId = getVndbIdForGame(uuid, gameName);
+    if (vndbId && /^\d+$/.test(vndbId)) {
+      vndbId = `v${vndbId}`;
+    }
+    const nameVal = vndbId ? vndbId : gameName;
+    const durStr = formatDurationMuramasa(durationSecs);
+    const parsedDate = safeParseDate(dateStr);
+    const cleanDate = parsedDate ? formatDate(parsedDate, "yyyy-MM-dd") : dateStr;
+    return `/log_vn name:${nameVal} characters:${Math.round(chars)} duration:${durStr} date:${cleanDate}`;
+  }
+
+  let toastMessage = $state<string | null>(null);
+  let toastTimer: ReturnType<typeof setTimeout> | undefined;
+
+  function showToast(msg: string) {
+    toastMessage = msg;
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => {
+      toastMessage = null;
+    }, 3200);
+  }
+
+  async function copySingleMuramasaLog(
+    gameName: string,
+    uuid: string,
+    chars: number,
+    time: number,
+    dateStr: string,
+  ) {
+    const cmd = buildMuramasaCommand(gameName, uuid, chars, time, dateStr);
+    try {
+      await navigator.clipboard.writeText(cmd);
+      showToast(`Copied Muramasa log for ${gameName}`);
+    } catch (err) {
+      console.error("Clipboard copy failed:", err);
+      showToast("Failed to copy to clipboard");
+    }
+  }
+
+  async function copyMultipleCommandsToClipboard(commands: string[]) {
+    if (commands.length === 0) return;
+    if (commands.length === 1) {
+      await navigator.clipboard.writeText(commands[0]);
+      return;
+    }
+    // Write in reverse order with 200ms delay so that commands[0] is at top of clipboard history
+    for (let i = commands.length - 1; i >= 0; i--) {
+      await navigator.clipboard.writeText(commands[i]);
+      if (i > 0) {
+        await new Promise((resolve) => setTimeout(resolve, 200));
+      }
+    }
+  }
+
+  function getGamesPlayedOnDate(dateStr: string) {
+    const entriesOnDate = data.filter((d) => d.date === dateStr);
+    const byGame = new Map<
+      string,
+      { uuid: string; name: string; type: string; chars: number; time: number }
+    >();
+
+    for (const d of entriesOnDate) {
+      const name = (d.name ?? d.given_identifier ?? "Unknown").trim();
+      const existing = byGame.get(name);
+      if (existing) {
+        existing.chars += d.chars_read ?? 0;
+        existing.time += d.time_read ?? 0;
+      } else {
+        byGame.set(name, {
+          uuid: d.uuid,
+          name,
+          type: d.type ?? "vn",
+          chars: d.chars_read ?? 0,
+          time: d.time_read ?? 0,
+        });
+      }
+    }
+    return Array.from(byGame.values()).filter((g) => g.time > 0 || g.chars > 0);
+  }
+
+  async function copyAllMuramasaLogsForDay(
+    dateStr: string,
+    games: { uuid: string; name: string; chars: number; time: number }[],
+  ) {
+    const commands = games.map((g) =>
+      buildMuramasaCommand(g.name, g.uuid, g.chars, g.time, dateStr)
+    );
+    try {
+      await copyMultipleCommandsToClipboard(commands);
+      showToast(
+        `Copied ${commands.length} Muramasa command${commands.length > 1 ? "s" : ""} to clipboard history (Win+V)`
+      );
+    } catch (err) {
+      console.error("Failed to copy Muramasa logs:", err);
+      showToast("Failed to copy to clipboard");
+    }
+  }
+
+  // VNDB Auto-detection and Manual Editing in Manage Games
+  let searchingVndbUuid = $state<string | null>(null);
+  let editingVndbUuid = $state<string | null>(null);
+  let editVndbValue = $state("");
+
+  async function autoDetectVndbId(uuid: string, gameName: string) {
+    searchingVndbUuid = uuid;
+    try {
+      const response = await browser.runtime.sendMessage({
+        action: "vndb_search",
+        query: gameName,
+      });
+      if (response && response.results && response.results.length > 0) {
+        const best = response.results[0];
+        const vndbId = best.id;
+        await setGameVndbId(uuid, vndbId);
+        await loadAllInstances();
+        showToast(`Matched "${gameName}" -> ${vndbId} (${best.title})`);
+      } else {
+        showToast(`No VNDB match found for "${gameName}". You can set it manually.`);
+      }
+    } catch (err) {
+      console.error("VNDB search failed:", err);
+      showToast("VNDB search failed. Check network connection.");
+    } finally {
+      searchingVndbUuid = null;
+    }
+  }
+
+  function startEditVndb(uuid: string, currentVal: string) {
+    editingVndbUuid = uuid;
+    editVndbValue = currentVal || "";
+  }
+
+  function cancelEditVndb() {
+    editingVndbUuid = null;
+    editVndbValue = "";
+  }
+
+  async function saveManualVndbId(uuid: string) {
+    let trimmed = editVndbValue.trim();
+    if (trimmed && /^\d+$/.test(trimmed)) {
+      trimmed = `v${trimmed}`;
+    }
+    await setGameVndbId(uuid, trimmed);
+    await loadAllInstances();
+    editingVndbUuid = null;
+    editVndbValue = "";
+    showToast(trimmed ? `Saved VNDB ID: ${trimmed}` : "Cleared VNDB ID");
   }
 
   function handleAddCustomSession(dateStr: string, game: { uuid: string; name: string }) {
@@ -2471,6 +2710,105 @@
               {:else}
                 <span class="truncate text-sm font-medium text-strong">{game.name}</span>
                 <span class="type-badge">{game.type}</span>
+                {#if muramasaLogging && (game.type === "vn" || !game.type)}
+                  {#if editingVndbUuid === game.uuid}
+                    <div class="flex items-center gap-1 ml-1">
+                      <input
+                        type="text"
+                        placeholder="e.g. v12345"
+                        bind:value={editVndbValue}
+                        class="rename-input w-24 text-xs py-0.5 px-1.5"
+                        onkeydown={(e) => {
+                          if (e.key === "Enter") saveManualVndbId(game.uuid);
+                          if (e.key === "Escape") cancelEditVndb();
+                        }}
+                      />
+                      <button
+                        class="btn-sm btn-primary px-1.5 py-0.5 text-[11px]"
+                        onclick={() => saveManualVndbId(game.uuid)}
+                        title="Save VNDB ID"
+                      >
+                        Save
+                      </button>
+                      <button
+                        class="btn-sm btn-secondary px-1.5 py-0.5 text-[11px]"
+                        onclick={cancelEditVndb}
+                        title="Cancel"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  {:else}
+                    {@const currentVndb = gameVndbMap.get(game.uuid) || ""}
+                    {#if currentVndb}
+                      <div class="flex items-center gap-1 ml-1">
+                        <a
+                          href="https://vndb.org/{currentVndb}"
+                          target="_blank"
+                          rel="noreferrer"
+                          class="badge-vndb text-[11px] font-mono px-1.5 py-0.5 rounded bg-sky-500/10 text-sky-400 hover:underline inline-flex items-center gap-1"
+                          title="Open {currentVndb} on VNDB"
+                        >
+                          <span>{currentVndb}</span>
+                          <svg class="h-2.5 w-2.5 opacity-60" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
+                            <polyline points="15 3 21 3 21 9"></polyline>
+                            <line x1="10" y1="14" x2="21" y2="3"></line>
+                          </svg>
+                        </a>
+                        <button
+                          class="btn-action text-muted hover:text-strong p-0.5"
+                          title="Edit VNDB ID"
+                          aria-label="Edit VNDB ID for {game.name}"
+                          onclick={() => startEditVndb(game.uuid, currentVndb)}
+                        >
+                          <svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M12 20h9"></path>
+                            <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>
+                          </svg>
+                        </button>
+                        <button
+                          class="btn-action text-muted hover:text-accent p-0.5"
+                          title="Re-detect VNDB ID"
+                          aria-label="Re-detect VNDB ID for {game.name}"
+                          disabled={searchingVndbUuid === game.uuid}
+                          onclick={() => autoDetectVndbId(game.uuid, game.name)}
+                        >
+                          <svg class="h-3 w-3 {searchingVndbUuid === game.uuid ? 'animate-spin' : ''}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <circle cx="11" cy="11" r="8"></circle>
+                            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                          </svg>
+                        </button>
+                      </div>
+                    {:else}
+                      <div class="flex items-center gap-1 ml-1">
+                        <button
+                          class="btn-sm btn-secondary text-[11px] px-1.5 py-0.5 flex items-center gap-1"
+                          disabled={searchingVndbUuid === game.uuid}
+                          onclick={() => autoDetectVndbId(game.uuid, game.name)}
+                          title="Auto-detect VNDB ID from VNDB API"
+                        >
+                          <svg class="h-3 w-3 {searchingVndbUuid === game.uuid ? 'animate-spin' : ''}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <circle cx="11" cy="11" r="8"></circle>
+                            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                          </svg>
+                          <span>{searchingVndbUuid === game.uuid ? "Searching…" : "Detect VNDB"}</span>
+                        </button>
+                        <button
+                          class="btn-action text-muted hover:text-strong p-0.5"
+                          title="Set VNDB ID manually"
+                          aria-label="Set VNDB ID manually for {game.name}"
+                          onclick={() => startEditVndb(game.uuid, "")}
+                        >
+                          <svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <line x1="12" y1="5" x2="12" y2="19"></line>
+                            <line x1="5" y1="12" x2="19" y2="12"></line>
+                          </svg>
+                        </button>
+                      </div>
+                    {/if}
+                  {/if}
+                {/if}
               {/if}
             </div>
 
@@ -3786,6 +4124,7 @@
       oncolorchange={handleColorChange}
       selectedGroup={legendSelectedGroup}
       onselect={(grp) => (legendSelectedGroup = grp)}
+      onbubblecontextmenu={muramasaLogging ? handleBubbleContextMenu : undefined}
     />
     <MediaGraphs
       data={uuid_summary}
@@ -3833,6 +4172,52 @@
       <span>Hide Game</span>
     </button>
   </ContextMenu>
+
+  <!-- Scatter Bubble Session Context Menu -->
+  {#if muramasaLogging}
+    <ContextMenu
+      bind:show={sessionMenu.show}
+      x={sessionMenu.x}
+      y={sessionMenu.y}
+      title={sessionMenu.gameName}
+      minWidth="15rem"
+      onclose={closeSessionMenu}
+    >
+      {#snippet headerIcon()}
+        <svg class="h-3.5 w-3.5 text-accent shrink-0 inline-block" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="10"></circle>
+          <polyline points="12 6 12 12 16 14"></polyline>
+        </svg>
+      {/snippet}
+      <div class="px-3 py-1.5 text-xs text-muted border-b border-dim mb-1 flex flex-col gap-0.5">
+        <div><span class="text-title font-medium">{sessionMenu.dateStr}</span></div>
+        <div class="flex items-center gap-2">
+          <span>{sessionMenu.chars.toLocaleString()} chars</span>
+          <span>•</span>
+          <span>{formatDurationMuramasa(sessionMenu.time)}</span>
+        </div>
+      </div>
+      <button
+        class="ctx-item font-medium text-accent"
+        onclick={() => {
+          copySingleMuramasaLog(
+            sessionMenu.gameName,
+            sessionMenu.uuid,
+            sessionMenu.chars,
+            sessionMenu.time,
+            sessionMenu.dateStr
+          );
+          closeSessionMenu();
+        }}
+      >
+        <svg class="h-3.5 w-3.5 text-accent shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+          <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+        </svg>
+        <span>Copy Muramasa Log</span>
+      </button>
+    </ContextMenu>
+  {/if}
 
   <!-- Heatmap Day Context Menu (derived from ContextMenu) -->
   <ContextMenu
@@ -3932,6 +4317,68 @@
         </button>
       {/each}
     {/if}
+
+    {#if muramasaLogging}
+      {@const vnGames = getGamesPlayedOnDate(dayMenu.dateStr).filter((g) => g.type === "vn" || getVndbIdForGame(g.uuid, g.name))}
+      {#if vnGames.length > 0}
+        <div class="ctx-divider"></div>
+        <div class="ctx-section-title">
+          <svg class="h-3 w-3 text-accent shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+          </svg>
+          <span>Muramasa Discord Log:</span>
+        </div>
+        {#if vnGames.length === 1}
+          <button
+            class="ctx-item font-medium text-accent"
+            onclick={() => {
+              copySingleMuramasaLog(
+                vnGames[0].name,
+                vnGames[0].uuid,
+                vnGames[0].chars,
+                vnGames[0].time,
+                dayMenu.dateStr
+              );
+              closeDayMenu();
+            }}
+          >
+            <svg class="h-3.5 w-3.5 text-accent shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+            </svg>
+            <span>Copy Log ({vnGames[0].name})</span>
+          </button>
+        {:else}
+          <button
+            class="ctx-item font-semibold text-accent"
+            onclick={() => {
+              copyAllMuramasaLogsForDay(dayMenu.dateStr, vnGames);
+              closeDayMenu();
+            }}
+            title="Writes each command sequentially to Windows Clipboard History (Win+V)"
+          >
+            <svg class="h-3.5 w-3.5 text-accent shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+            </svg>
+            <span>Copy All Logs ({vnGames.length})</span>
+          </button>
+          {#each vnGames as g}
+            <button
+              class="ctx-item pl-5 truncate"
+              onclick={() => {
+                copySingleMuramasaLog(g.name, g.uuid, g.chars, g.time, dayMenu.dateStr);
+                closeDayMenu();
+              }}
+            >
+              <span class="text-[10px] text-muted">•</span>
+              <span class="truncate">Copy {g.name}</span>
+            </button>
+          {/each}
+        {/if}
+      {/if}
+    {/if}
   </ContextMenu>
 
   <!-- Period Header Context Menu (derived from ContextMenu) -->
@@ -3963,6 +4410,18 @@
     </button>
   </ContextMenu>
 </div>
+
+{#if toastMessage}
+  <div
+    class="fixed bottom-6 right-6 z-50 rounded-lg bg-surface/95 border border-dim px-4 py-2.5 shadow-2xl text-xs sm:text-sm font-medium text-title flex items-center gap-2 backdrop-blur-md"
+    transition:fade={{ duration: 150 }}
+  >
+    <svg class="h-4 w-4 text-accent shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+      <polyline points="20 6 9 17 4 12"></polyline>
+    </svg>
+    <span>{toastMessage}</span>
+  </div>
+{/if}
 
 <style global lang="postcss">
   @import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:ital,wght@0,100..700;1,100..700&family=Outfit:wght@100..900&display=swap");

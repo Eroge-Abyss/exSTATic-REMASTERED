@@ -17,6 +17,7 @@
     groupAccessor?: (d: DataEntry) => string;
     onbubblehover?: (group: string | null) => void;
     onbubbleselect?: (group: string | null) => void;
+    onbubblecontextmenu?: (d: DataEntry, event: MouseEvent) => void;
   }
 
   let {
@@ -34,6 +35,7 @@
     groupAccessor,
     onbubblehover,
     onbubbleselect,
+    onbubblecontextmenu,
   }: Props = $props();
 
   let ready = $derived(
@@ -113,6 +115,12 @@
       }}
       onmouseenter={() => handleMouseEnter(d, i)}
       onclick={() => handleClick(d, i)}
+      oncontextmenu={(e) => {
+        e.preventDefault();
+        if (onbubblecontextmenu) {
+          onbubblecontextmenu(d, e);
+        }
+      }}
       style="transition: cx 0.5s cubic-bezier(0.2, 0.8, 0.2, 1), cy 0.5s cubic-bezier(0.2, 0.8, 0.2, 1), r 0.5s cubic-bezier(0.2, 0.8, 0.2, 1), fill 0.5s ease, fill-opacity 0.15s ease; cursor: pointer;"
     />
   {/each}

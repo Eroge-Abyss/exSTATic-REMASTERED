@@ -17,6 +17,7 @@
   let disableAnimations = $state(false);
   let showTexthookerWs = $state(true);
   let showTadokuWs = $state(true);
+  let muramasaLogging = $state(false);
   let currentTheme = $state<ThemeId>("dark");
   let selectedTheme = $derived(themeList.find((t) => t.id === currentTheme));
   let isThemeDropdownOpen = $state(false);
@@ -35,6 +36,7 @@
       "show_texthooker_ws",
       "show_tadoku_ws",
       "show_websocket_icons",
+      "muramasa_logging",
     ]);
     disableAnimations = !!data.disable_animations;
     showTexthookerWs =
@@ -45,6 +47,7 @@
       data.show_tadoku_ws !== undefined
         ? !!data.show_tadoku_ws
         : (data.show_websocket_icons !== undefined ? !!data.show_websocket_icons : true);
+    muramasaLogging = !!data.muramasa_logging;
     window.addEventListener("click", handleClickOutside);
     return () => {
       window.removeEventListener("click", handleClickOutside);
@@ -67,6 +70,13 @@
     showTadokuWs = !showTadokuWs;
     await browser.storage.local.set({
       show_tadoku_ws: showTadokuWs,
+    });
+  };
+
+  const toggleMuramasaLogging = async () => {
+    muramasaLogging = !muramasaLogging;
+    await browser.storage.local.set({
+      muramasa_logging: muramasaLogging,
     });
   };
 
@@ -253,6 +263,17 @@
       value="8"
       root_css="--default-menu-blur"
     />
+    <SettingRow label="Muramasa Bot Logging">
+      <button
+        type="button"
+        class="rounded-lg px-6 py-2 font-medium transition-colors cursor-pointer {muramasaLogging
+          ? 'bg-button text-white hover:bg-hover'
+          : 'bg-backdrop text-text hover:opacity-80'}"
+        onclick={toggleMuramasaLogging}
+      >
+        {muramasaLogging ? "ON (Enabled)" : "OFF (Disabled)"}
+      </button>
+    </SettingRow>
   {:else if type === "mokuro"}
     <MenuOption
       media_storage={mokuro_storage}

@@ -36,6 +36,7 @@
     ontabchange?: (index: number) => void;
     selectedGroup?: string | null;
     onselect?: (group: string | null) => void;
+    onbubblecontextmenu?: (d: DataEntry, event: MouseEvent) => void;
   }
 
   let {
@@ -56,6 +57,7 @@
     ontabchange,
     selectedGroup = $bindable(null),
     onselect,
+    onbubblecontextmenu,
   }: Props = $props();
 
   let radius = 75;
@@ -361,6 +363,7 @@
           groupAccessor={(d) => c_accessor(d)}
           onbubblehover={handleBubbleHover}
           onbubbleselect={handleLegendSelect}
+          {onbubblecontextmenu}
           bind:mouse_move
           bind:mouse_out
         />
