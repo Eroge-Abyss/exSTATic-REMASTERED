@@ -4084,10 +4084,10 @@
     background: color-mix(in srgb, var(--exs-accent, #818cf8) 18%, var(--exs-surface, #1e293b));
     color: var(--exs-text-strong, #ffffff);
     border: 1px solid var(--exs-accent, #818cf8);
-    box-shadow: 0 1px 4px color-mix(in srgb, var(--exs-accent, #818cf8) 25%, transparent);
+    box-shadow: none;
   }
   .pill-active:hover {
-    background: color-mix(in srgb, var(--exs-accent, #818cf8) 26%, var(--exs-surface, #1e293b));
+    box-shadow: none;
   }
   .pill-inactive {
     background: var(--exs-surface, #1e293b);
