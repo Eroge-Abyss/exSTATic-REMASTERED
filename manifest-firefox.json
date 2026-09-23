@@ -18,7 +18,8 @@
     "unlimitedStorage",
     "tabs",
     "scripting",
-    "downloads"
+    "downloads",
+    "contextMenus"
   ],
   "host_permissions": [
     "https://kamwithk.github.io/exSTATic/**.html",

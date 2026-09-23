@@ -47,8 +47,34 @@ const runOnContentScripts = async (func: (tab: Tabs.Tab) => void) => {
   }
 };
 
+const setupContextMenus = async () => {
+  try {
+    if (!browser.contextMenus) return;
+    await browser.contextMenus.removeAll();
+    browser.contextMenus.create({
+      id: "open_tracker",
+      title: "Open Tracker",
+      contexts: ["action"],
+    });
+    browser.contextMenus.create({
+      id: "open_stats",
+      title: "Open Statistics",
+      contexts: ["action"],
+    });
+    browser.contextMenus.create({
+      id: "open_settings",
+      title: "Open Settings",
+      contexts: ["action"],
+    });
+  } catch (e) {
+    console.error("Failed to setup context menus:", e);
+  }
+};
+
 browser.runtime.onUpdateAvailable.addListener(() => browser.runtime.reload());
 browser.runtime.onInstalled.addListener(async () => {
+  setupContextMenus();
+
   if (!(await browser.storage.local.get("client"))["client"])
     await browser.storage.local.set({ client: crypto.randomUUID() });
 
@@ -61,6 +87,26 @@ browser.runtime.onInstalled.addListener(async () => {
 
   console.log("Reloading all extension tabs...");
   runOnContentScripts(reloadTab);
+});
+
+setupContextMenus();
+
+browser.contextMenus.onClicked.addListener(async (info) => {
+  const urlMap: Record<string, string> = {
+    open_tracker: "https://kamwithk.github.io/exSTATic/tracker.html",
+    open_stats: "https://kamwithk.github.io/exSTATic/stats.html",
+    open_settings: "https://kamwithk.github.io/exSTATic/settings.html",
+  };
+
+  const targetUrl = urlMap[info.menuItemId as string];
+  if (targetUrl) {
+    const tabs = await browser.tabs.query({ url: `${targetUrl}*` });
+    if (tabs.length > 0 && tabs[0].id !== undefined) {
+      await browser.tabs.update(tabs[0].id, { active: true });
+    } else {
+      await browser.tabs.create({ url: targetUrl });
+    }
+  }
 });
 
 // Message passing is used for actions which can only be performed on the background page
