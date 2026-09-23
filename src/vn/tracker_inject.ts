@@ -82,8 +82,4 @@ const setup = async () => {
     },
   });
 };
-
-if (!(window as any).__exstatic_tracker_initialized) {
-  (window as any).__exstatic_tracker_initialized = true;
-  setup();
-}
+setup();

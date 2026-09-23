@@ -92,27 +92,17 @@ browser.runtime.onInstalled.addListener(async () => {
 setupContextMenus();
 
 browser.contextMenus.onClicked.addListener(async (info) => {
-  const localUrlMap: Record<string, string> = {
-    open_tracker: browser.runtime.getURL("docs/tracker.html"),
-    open_stats: browser.runtime.getURL("docs/stats.html"),
-    open_settings: browser.runtime.getURL("docs/settings.html"),
+  const urlMap: Record<string, string> = {
+    open_tracker: "https://kamwithk.github.io/exSTATic/tracker.html",
+    open_stats: "https://kamwithk.github.io/exSTATic/stats.html",
+    open_settings: "https://kamwithk.github.io/exSTATic/settings.html",
   };
 
-  const pageKeywordMap: Record<string, string> = {
-    open_tracker: "tracker.html",
-    open_stats: "stats.html",
-    open_settings: "settings.html",
-  };
-
-  const targetUrl = localUrlMap[info.menuItemId as string];
-  const keyword = pageKeywordMap[info.menuItemId as string];
-  if (targetUrl && keyword) {
-    const tabs = await browser.tabs.query({});
-    const existingTab = tabs.find(
-      (t) => t.url && t.url.includes(keyword),
-    );
-    if (existingTab && existingTab.id !== undefined) {
-      await browser.tabs.update(existingTab.id, { active: true });
+  const targetUrl = urlMap[info.menuItemId as string];
+  if (targetUrl) {
+    const tabs = await browser.tabs.query({ url: `${targetUrl}*` });
+    if (tabs.length > 0 && tabs[0].id !== undefined) {
+      await browser.tabs.update(tabs[0].id, { active: true });
     } else {
       await browser.tabs.create({ url: targetUrl });
     }

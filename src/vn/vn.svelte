@@ -112,7 +112,7 @@
   const openStats = () => {
     browser.runtime.sendMessage({
       action: "open_tab",
-      url: browser.runtime.getURL("docs/stats.html"),
+      url: "https://kamwithk.github.io/exSTATic/stats.html",
     });
   };
 
@@ -302,10 +302,7 @@
         id="settings_page"
         class="menu-button"
         onclick={() =>
-          browser.runtime.sendMessage({
-            action: "open_tab",
-            url: browser.runtime.getURL("docs/settings.html"),
-          })}
+          window.open("https://kamwithk.github.io/exSTATic/settings.html")}
       >
         Settings
       </button>

@@ -3511,6 +3511,8 @@
 </div>
 
 <style global lang="postcss">
+  @import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:ital,wght@0,100..700;1,100..700&family=Outfit:wght@100..900&display=swap");
+
   .font-substat-num {
     font-family: "Outfit", sans-serif;
     font-weight: 500;

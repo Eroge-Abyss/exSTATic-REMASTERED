@@ -28,19 +28,5 @@ async function download(args: MessageActionArgs) {
 }
 
 async function open_tab(url: string) {
-  try {
-    const tabs = await browser.tabs.query({});
-    const filename = url.split("/").pop()?.split("?")[0];
-    const existingTab = filename
-      ? tabs.find((t) => t.url && t.url.includes(filename))
-      : undefined;
-
-    if (existingTab && existingTab.id !== undefined) {
-      await browser.tabs.update(existingTab.id, { active: true });
-      return;
-    }
-  } catch (e) {
-    console.error("Error finding existing tab:", e);
-  }
   await browser.tabs.create({ url: url });
 }
