@@ -211,7 +211,9 @@
                 class:connected={lunaConnected}
                 title={lunaConnected ? "Texthooker: connected" : "Texthooker: disconnected"}
               >
-                <span class="material-icons ws-plug">electrical_services</span>
+                <svg class="ws-plug" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M5,4C3.89,4 3,4.89 3,6V18A2,2 0 0,0 5,20H9V18H5V8H19V18H15V20H19A2,2 0 0,0 21,18V6C21,4.89 20.1,4 19,4H5M12,11A3,3 0 0,0 9,14A3,3 0 0,0 12,17A3,3 0 0,0 15,14A3,3 0 0,0 12,11Z" />
+                </svg>
               </span>
             {/if}
             {#if showTadokuWs}
@@ -220,7 +222,9 @@
                 class:connected={tadokuConnected}
                 title={tadokuConnected ? "Tadoku: connected" : "Tadoku: disconnected"}
               >
-                <span class="material-icons ws-plug">electrical_services</span>
+                <svg class="ws-plug" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M5,4C3.89,4 3,4.89 3,6V18A2,2 0 0,0 5,20H9V18H5V8H19V18H15V20H19A2,2 0 0,0 21,18V6C21,4.89 20.1,4 19,4H5M12,11A3,3 0 0,0 9,14A3,3 0 0,0 12,17A3,3 0 0,0 15,14A3,3 0 0,0 12,11Z" />
+                </svg>
                 <span class="ws-badge">多</span>
               </span>
             {/if}
@@ -437,7 +441,9 @@
 
   .ws-plug {
     @apply cursor-default;
-    font-size: 1.5rem;
+    width: 1.5rem;
+    height: 1.5rem;
+    display: block;
   }
 
   .ws-badge {
