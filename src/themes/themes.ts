@@ -1,7 +1,6 @@
 export type ThemeId =
   | "dark"
   | "white"
-  | "black"
   | "tadoku-default"
   | "tokyo-night"
   | "sakura"
@@ -23,7 +22,6 @@ export interface ThemeInfo {
 export const themeList: ThemeInfo[] = [
   { id: "dark", name: "Classic Dark", primary: "#818cf8", background: "#1e293b", accent: "#334155" },
   { id: "white", name: "White", primary: "#4f46e5", background: "#f8fafc", accent: "#e2e8f0" },
-  { id: "black", name: "OLED Black", primary: "#818cf8", background: "#070614", accent: "#181533" },
   { id: "tadoku-default", name: "Tadoku Dark", primary: "#bb9af7", background: "#1b1b1b", accent: "#2a2a2a" },
   { id: "tokyo-night", name: "Tokyo Night", primary: "#bb9af7", background: "#1a1b26", accent: "#24283b" },
   { id: "sakura", name: "Sakura Pink", primary: "#f978b6", background: "#1f1d2e", accent: "#2d2a3e" },
@@ -89,35 +87,6 @@ export const themes: Record<ThemeId, ThemeTokens> = {
     "--exs-heatmap-lo": "#818cf8",
     "--exs-heatmap-hi": "#4338ca",
     "--exs-section-shadow": "0 2px 12px rgba(15, 23, 42, 0.08), 0 0 0 1px rgba(15, 23, 42, 0.07)",
-  },
-  black: {
-    "--exs-backdrop": "#070614",
-    "--exs-block": "#0d0b1f",
-    "--exs-surface": "#13102a",
-    "--exs-chart-bg": "#070614",
-    "--exs-title": "#818cf8",
-    "--exs-text": "#a1a1aa",
-    "--exs-text-strong": "#f4f4f5",
-    "--exs-text-muted": "#71717a",
-    "--exs-accent": "#818cf8",
-    "--exs-accent-dim": "#6366f1",
-    "--exs-accent-hover": "#4338ca",
-    "--exs-accent-text": "#ffffff",
-    "--exs-icon": "#ffffff",
-    "--exs-menu-bg": "#181533",
-    "--exs-menu-text": "#e4e4e7",
-    "--exs-border": "#29244f",
-    "--exs-border-dim": "#181533",
-    "--exs-card-bg": "#818cf8",
-    "--exs-card-border": "transparent",
-    "--exs-card-line": "transparent",
-    "--exs-card-text": "#0f172a",
-    "--exs-btn-primary-bg": "#4f46e5",
-    "--exs-btn-primary-text": "#ffffff",
-    "--exs-heatmap-empty": "#181533",
-    "--exs-heatmap-lo": "#818cf8",
-    "--exs-heatmap-hi": "#4338ca",
-    "--exs-section-shadow": "0 4px 24px rgba(0, 0, 0, 0.8), 0 0 0 1px #29244f",
   },
   "tadoku-default": {
     "--exs-backdrop": "#1b1b1b",
