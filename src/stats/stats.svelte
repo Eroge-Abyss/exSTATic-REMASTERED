@@ -758,7 +758,9 @@
 
   // Get all unique game names visible in the current year/All Time + media filter.
   let allGameNames = $derived(
-    Array.from(new Set(yearMediaData.map((d) => d.name))).sort(),
+    Array.from(new Set(yearMediaData.map((d) => d.name))).sort((a, b) =>
+      (a ?? "").localeCompare(b ?? "", undefined, { sensitivity: "base" }),
+    ),
   );
 
   let filterSearchQuery = $state("");
@@ -2102,21 +2104,37 @@
       {/if}
 
       <!-- Pills Container -->
-      <div class="filter-pills-scroll flex flex-wrap gap-2 max-h-[50vh] overflow-y-auto pr-1">
+      <div class="filter-pills-scroll flex flex-wrap gap-1.5 max-h-[50vh] overflow-y-auto pr-1">
         {#each displayedFilterGames as gameName}
           <button
             class="pill {selectedGames.has(gameName)
               ? 'pill-active'
               : 'pill-inactive'}"
+            title={gameName}
             onclick={() => toggleGame(gameName)}
           >
-            {#if color_overrides[gameName]}
-              <span
-                class="inline-block h-2.5 w-2.5 rounded-full ring-1 ring-black/20"
-                style="background-color: {color_overrides[gameName]};"
-              ></span>
+            {#if selectedGames.has(gameName)}
+              {#if color_overrides[gameName]}
+                <span
+                  class="inline-block h-2 w-2 shrink-0 rounded-full"
+                  style="background-color: {color_overrides[gameName]};"
+                ></span>
+              {:else}
+                <svg class="h-3 w-3 shrink-0 text-accent" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+                  <polyline points="20 6 9 17 4 12"></polyline>
+                </svg>
+              {/if}
+            {:else}
+              {#if color_overrides[gameName]}
+                <span
+                  class="inline-block h-2 w-2 shrink-0 rounded-full opacity-40"
+                  style="background-color: {color_overrides[gameName]};"
+                ></span>
+              {:else}
+                <span class="inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-muted/40"></span>
+              {/if}
             {/if}
-            <span>{gameName}</span>
+            <span class="truncate">{gameName}</span>
           </button>
         {/each}
         {#if displayedFilterGames.length === 0}
@@ -4059,22 +4077,28 @@
 
   /* Pills for filter */
   .pill {
-    @apply flex cursor-pointer items-center gap-1.5 rounded-full px-3 py-1 text-xs sm:text-sm font-medium;
+    @apply inline-flex cursor-pointer items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium max-w-[13.5rem] select-none;
     transition: all 0.15s ease;
   }
   .pill-active {
-    background: var(--exs-accent, #818cf8);
-    color: var(--exs-accent-text, #ffffff);
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+    background: color-mix(in srgb, var(--exs-accent, #818cf8) 18%, var(--exs-surface, #1e293b));
+    color: var(--exs-text-strong, #ffffff);
+    border: 1px solid var(--exs-accent, #818cf8);
+    box-shadow: 0 1px 4px color-mix(in srgb, var(--exs-accent, #818cf8) 25%, transparent);
+  }
+  .pill-active:hover {
+    background: color-mix(in srgb, var(--exs-accent, #818cf8) 26%, var(--exs-surface, #1e293b));
   }
   .pill-inactive {
     background: var(--exs-surface, #1e293b);
     color: var(--exs-text-muted, #94a3b8);
-    border: 1px solid var(--exs-border, transparent);
+    border: 1px solid var(--exs-border, #334155);
+    opacity: 0.65;
   }
   .pill-inactive:hover {
+    opacity: 1;
     color: var(--exs-text-strong, #ffffff);
-    border-color: var(--exs-accent, #818cf8);
+    border-color: color-mix(in srgb, var(--exs-accent, #818cf8) 60%, var(--exs-border, #334155));
   }
 
   /* Filter popup */
