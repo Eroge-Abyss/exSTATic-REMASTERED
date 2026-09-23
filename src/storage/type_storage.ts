@@ -101,6 +101,16 @@ export class TypeStorage {
       }
 
       await browser.storage.local.set(media_entries);
+
+      if (this.type === "vn") {
+        browser.runtime
+          .sendMessage({
+            action: "auto_detect_vndb",
+            uuid: new_uuid,
+            query: given_identifier,
+          })
+          .catch(() => {});
+      }
     }
 
     return media_entries["media"][media_key];

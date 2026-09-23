@@ -145,6 +145,9 @@
   let allInstances = $state<{ uuid: string; name: string; type: string; vndb_id?: string }[]>([]);
   async function loadAllInstances() {
     allInstances = await getAllInstances();
+    if (muramasaLogging) {
+      autoDetectMissingVndbIds();
+    }
   }
   loadAllInstances();
 
@@ -542,6 +545,53 @@
     }, 3200);
   }
 
+  let autoDetectingBatch = $state(false);
+
+  async function autoDetectMissingVndbIds() {
+    if (autoDetectingBatch) return;
+    const vnWithoutId = allInstances.filter(
+      (inst) => (inst.type === "vn" || !inst.type) && !inst.vndb_id && inst.name?.trim()
+    );
+    if (vnWithoutId.length === 0) return;
+    autoDetectingBatch = true;
+    try {
+      for (const inst of vnWithoutId) {
+        await browser.runtime.sendMessage({
+          action: "auto_detect_vndb",
+          uuid: inst.uuid,
+          query: inst.name,
+        });
+        await new Promise((r) => setTimeout(r, 250));
+      }
+    } finally {
+      autoDetectingBatch = false;
+      allInstances = await getAllInstances();
+    }
+  }
+
+  $effect(() => {
+    if (muramasaLogging && allInstances.length > 0) {
+      autoDetectMissingVndbIds();
+    }
+  });
+
+  async function ensureVndbId(uuid: string, gameName: string): Promise<string> {
+    let existingId = getVndbIdForGame(uuid, gameName);
+    if (existingId) return existingId;
+    try {
+      const res = await browser.runtime.sendMessage({
+        action: "auto_detect_vndb",
+        uuid,
+        query: gameName,
+      });
+      if (res && res.vndb_id) {
+        allInstances = await getAllInstances();
+        return res.vndb_id;
+      }
+    } catch {}
+    return gameName;
+  }
+
   async function copySingleMuramasaLog(
     gameName: string,
     uuid: string,
@@ -549,6 +599,7 @@
     time: number,
     dateStr: string,
   ) {
+    await ensureVndbId(uuid, gameName);
     const cmd = buildMuramasaCommand(gameName, uuid, chars, time, dateStr);
     try {
       await navigator.clipboard.writeText(cmd);
@@ -604,6 +655,9 @@
     dateStr: string,
     games: { uuid: string; name: string; chars: number; time: number }[],
   ) {
+    for (const g of games) {
+      await ensureVndbId(g.uuid, g.name);
+    }
     const commands = games.map((g) =>
       buildMuramasaCommand(g.name, g.uuid, g.chars, g.time, dateStr)
     );
@@ -627,15 +681,14 @@
     searchingVndbUuid = uuid;
     try {
       const response = await browser.runtime.sendMessage({
-        action: "vndb_search",
+        action: "auto_detect_vndb",
+        uuid,
         query: gameName,
       });
-      if (response && response.results && response.results.length > 0) {
-        const best = response.results[0];
-        const vndbId = best.id;
-        await setGameVndbId(uuid, vndbId);
-        await loadAllInstances();
-        showToast(`Matched "${gameName}" -> ${vndbId} (${best.title})`);
+      if (response && response.vndb_id) {
+        allInstances = await getAllInstances();
+        showToast(`Matched "${gameName}" -> ${response.vndb_id} (${response.title || gameName})`);
+        return response.vndb_id;
       } else {
         showToast(`No VNDB match found for "${gameName}". You can set it manually.`);
       }
@@ -645,6 +698,7 @@
     } finally {
       searchingVndbUuid = null;
     }
+    return "";
   }
 
   function startEditVndb(uuid: string, currentVal: string) {
@@ -777,10 +831,14 @@
 
   async function submitRename(uuid: string) {
     if (renameValue.trim()) {
-      await renameGame(uuid, renameValue.trim());
+      const newName = renameValue.trim();
+      await renameGame(uuid, newName);
       renamingUuid = null;
       renameValue = "";
       await refreshData();
+      if (muramasaLogging) {
+        await autoDetectVndbId(uuid, newName);
+      }
     }
   }
 
@@ -923,10 +981,14 @@
   async function createTitle() {
     if (!newTitleName.trim()) return;
     creatingTitle = true;
-    const inst = await createManualTitle(newTitleName.trim(), newTitleType);
+    const titleName = newTitleName.trim();
+    const inst = await createManualTitle(titleName, newTitleType);
     await loadAllInstances();
     newTitleName = "";
     creatingTitle = false;
+    if (newTitleType === "vn" && muramasaLogging) {
+      autoDetectVndbId(inst.uuid, titleName);
+    }
     // Immediately open the editor for the new title
     startEditStats(inst);
   }
@@ -2632,12 +2694,21 @@
 
       <!-- Active Games -->
       <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
-        <p class="text-xs font-semibold uppercase tracking-widest text-muted">
+        <p class="text-xs font-semibold uppercase tracking-widest text-muted flex items-center">
           Active Titles
           {#if gameSearchQuery.trim()}
             <span class="ml-1 text-[11px] normal-case text-accent font-medium">({displayedGames.length} of {uniqueGames.length})</span>
           {:else}
             <span class="ml-1 text-[11px] normal-case text-muted">({uniqueGames.length})</span>
+          {/if}
+          {#if autoDetectingBatch}
+            <span class="ml-2 text-[11px] normal-case text-accent font-medium animate-pulse inline-flex items-center gap-1">
+              <svg class="h-3 w-3 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="11" cy="11" r="8"></circle>
+                <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+              </svg>
+              Auto-detecting VNDB…
+            </span>
           {/if}
         </p>
 

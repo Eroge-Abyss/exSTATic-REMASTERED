@@ -79,7 +79,7 @@ export async function getAllInstances(): Promise<
 export async function createManualTitle(
   name: string,
   type: string,
-): Promise<{ uuid: string; name: string; type: string }> {
+): Promise<{ uuid: string; name: string; type: string; vndb_id?: string }> {
   const uuid = crypto.randomUUID();
   const details = {
     name: name.trim(),
@@ -90,6 +90,15 @@ export async function createManualTitle(
     manual: true,
   };
   await browser.storage.local.set({ [uuid]: details });
+  if (type === "vn") {
+    browser.runtime
+      .sendMessage({
+        action: "auto_detect_vndb",
+        uuid,
+        query: name.trim(),
+      })
+      .catch(() => {});
+  }
   return { uuid, name: name.trim(), type };
 }
 
@@ -377,6 +386,15 @@ export async function renameGame(
   if (!details) return;
   details.name = newName;
   await browser.storage.local.set({ [uuid]: details });
+  if (!details.type || details.type === "vn") {
+    browser.runtime
+      .sendMessage({
+        action: "auto_detect_vndb",
+        uuid,
+        query: newName.trim(),
+      })
+      .catch(() => {});
+  }
 }
 
 export async function setGameVndbId(
