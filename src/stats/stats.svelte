@@ -734,6 +734,13 @@
     ).sort((a, b) => (a.name ?? "").localeCompare(b.name ?? "")),
   );
 
+  let gameSearchQuery = $state("");
+  let displayedGames = $derived.by(() => {
+    const q = gameSearchQuery.trim().toLowerCase();
+    if (!q) return uniqueGames;
+    return uniqueGames.filter((g) => (g.name ?? "").toLowerCase().includes(q));
+  });
+
   // Get all unique game names visible in the current year/All Time + media filter.
   let allGameNames = $derived(
     Array.from(new Set(yearMediaData.map((d) => d.name))).sort(),
@@ -2208,8 +2215,46 @@
       </div>
 
       <!-- Active Games -->
+      <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <p class="text-xs font-semibold uppercase tracking-widest text-muted">
+          Active Titles
+          {#if gameSearchQuery.trim()}
+            <span class="ml-1 text-[11px] normal-case text-accent font-medium">({displayedGames.length} of {uniqueGames.length})</span>
+          {:else}
+            <span class="ml-1 text-[11px] normal-case text-muted">({uniqueGames.length})</span>
+          {/if}
+        </p>
+
+        <!-- Search Input -->
+        <div class="relative flex items-center min-w-44 sm:min-w-60 flex-1 sm:flex-none">
+          <svg class="pointer-events-none absolute left-2.5 h-3.5 w-3.5 text-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="11" cy="11" r="8"></circle>
+            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+          </svg>
+          <input
+            type="text"
+            placeholder="Search titles…"
+            bind:value={gameSearchQuery}
+            class="panel-input w-full rounded-md pl-8 pr-7 py-1 text-xs outline-none"
+          />
+          {#if gameSearchQuery}
+            <button
+              class="absolute right-2 text-muted hover:text-strong cursor-pointer p-0.5"
+              onclick={() => (gameSearchQuery = "")}
+              title="Clear search"
+              aria-label="Clear search"
+            >
+              <svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="18" y1="6" x2="6" y2="18"></line>
+                <line x1="6" y1="6" x2="18" y2="18"></line>
+              </svg>
+            </button>
+          {/if}
+        </div>
+      </div>
+
       <div class="games-scroll-container space-y-1.5">
-        {#each uniqueGames as game}
+        {#each displayedGames as game}
           <div class="game-row">
             <div class="flex min-w-0 flex-1 items-center gap-2.5">
               {#if color_overrides[game.name]}
@@ -2424,8 +2469,12 @@
             </div>
           {/if}
         {/each}
-        {#if uniqueGames.length === 0}
-          <p class="py-2 text-xs text-muted">No games recorded in {displayTime}.</p>
+        {#if displayedGames.length === 0}
+          {#if gameSearchQuery.trim()}
+            <p class="py-4 text-center text-xs text-muted">No titles matching "{gameSearchQuery}".</p>
+          {:else}
+            <p class="py-2 text-xs text-muted">No games recorded in {displayTime}.</p>
+          {/if}
         {/if}
       </div>
 
