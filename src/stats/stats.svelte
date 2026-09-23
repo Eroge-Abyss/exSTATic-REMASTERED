@@ -271,8 +271,11 @@
   /** Switch the Reading Summary period. Independent of the header year picker. */
   function selectPeriod(p: PeriodType) {
     selectedPeriod = p;
+    selectedHeatmapDay = null;
     if (p !== "Custom") {
       showCustomDatePicker = false;
+      customHighlightStart = undefined;
+      customHighlightEnd = undefined;
     }
   }
 
@@ -1055,6 +1058,7 @@
     periodOffset = 0;
     charAvgIndex = 0;
     timeAvgIndex = 0;
+    selectedHeatmapDay = null;
     if (selectedPeriod !== "Custom") {
       customHighlightStart = undefined;
       customHighlightEnd = undefined;
@@ -1193,6 +1197,9 @@
 
   function changePeriodOffset(delta: number) {
     periodOffset += delta;
+    selectedHeatmapDay = null;
+    customHighlightStart = undefined;
+    customHighlightEnd = undefined;
     let rDate = baseDate;
     if (periodOffset !== 0) {
       if (selectedPeriod === "Week")

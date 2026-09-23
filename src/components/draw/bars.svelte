@@ -42,36 +42,34 @@
       cGet !== undefined,
   );
 
+  function isHighlighted(d: Partial<DataEntry>): boolean {
+    if (!d.date) return false;
+
+    const inGame =
+      highlight_dates !== undefined ? highlight_dates.has(d.date) : true;
+
+    const inPeriod =
+      highlight_start && highlight_end
+        ? d.date >= highlight_start && d.date <= highlight_end
+        : true;
+
+    return inGame && inPeriod;
+  }
+
   function getOpacity(d: Partial<DataEntry>, i: number): string {
-    const isSingleDayTarget =
-      highlight_start && highlight_end && highlight_start === highlight_end;
+    const hasFilter =
+      highlight_dates !== undefined || Boolean(highlight_start && highlight_end);
 
     if (hovered_index !== null) {
       if (i === hovered_index) return "1";
-      if (isSingleDayTarget) {
-        return d.date === highlight_start ? "0.6" : "0.15";
-      }
-      if (highlight_dates) {
-        return d.date && highlight_dates.has(d.date) ? "0.6" : "0.15";
-      }
-      if (highlight_start && highlight_end && d.date) {
-        return d.date >= highlight_start && d.date <= highlight_end
-          ? "0.6"
-          : "0.15";
+      if (hasFilter) {
+        return isHighlighted(d) ? "0.6" : "0.15";
       }
       return "0.65";
     }
 
-    if (isSingleDayTarget) {
-      return d.date === highlight_start ? "0.85" : "0.2";
-    }
-    if (highlight_dates) {
-      return d.date && highlight_dates.has(d.date) ? "0.85" : "0.2";
-    }
-    if (highlight_start && highlight_end && d.date) {
-      return d.date >= highlight_start && d.date <= highlight_end
-        ? "0.85"
-        : "0.2";
+    if (hasFilter) {
+      return isHighlighted(d) ? "0.85" : "0.2";
     }
     return "0.85";
   }
