@@ -4,56 +4,184 @@ import { InstanceStorage, type Stat } from "../storage/instance_storage";
 import * as browser from "webextension-polyfill";
 import type { DataEntry } from "./data_extraction";
 
+async function batchSet(items: Record<string, unknown>, chunkSize = 500) {
+  const entries = Object.entries(items);
+  for (let i = 0; i < entries.length; i += chunkSize) {
+    const chunk = Object.fromEntries(entries.slice(i, i + chunkSize));
+    await browser.storage.local.set(chunk);
+  }
+}
+
 export async function importStats(data: DataEntry[]) {
-  for (const entry of data) {
+  if (!Array.isArray(data) || data.length === 0) return;
+
+  const validEntries = data.filter(
+    (entry) =>
+      entry &&
+      entry.hasOwnProperty("type") &&
+      entry.hasOwnProperty("date") &&
+      entry.hasOwnProperty("given_identifier") &&
+      entry["type"] &&
+      entry["date"] &&
+      entry["given_identifier"],
+  );
+
+  if (validEntries.length === 0) return;
+
+  // 1. Upfront batch read for client and global metadata
+  const metaRaw = await browser.storage.local.get([
+    "client",
+    "types",
+    "media",
+    "immersion_dates",
+  ]);
+
+  const defaultClient = (metaRaw["client"] as string) ?? crypto.randomUUID();
+  const typesList: string[] = Array.isArray(metaRaw["types"])
+    ? [...metaRaw["types"]]
+    : [];
+  const mediaRaw = metaRaw["media"] ?? {};
+  const mediaMap: Record<string, string> =
+    mediaRaw && typeof mediaRaw === "object" ? { ...mediaRaw } : {};
+  const immersionDatesSet = new Set<string>(
+    Array.isArray(metaRaw["immersion_dates"])
+      ? (metaRaw["immersion_dates"] as string[])
+      : [],
+  );
+
+  // 2. Discover/assign UUID for every entry using mediaMap
+  const entryUuids = new Map<DataEntry, string>();
+  const allUuids = new Set<string>();
+  const uniqueTypes = new Set<string>();
+
+  for (const entry of validEntries) {
+    const type = String(entry["type"]);
+    uniqueTypes.add(type);
+    if (!typesList.includes(type)) {
+      typesList.push(type);
+    }
+
+    const givenIdentifier = String(entry["given_identifier"]);
+    const mediaKey = JSON.stringify([givenIdentifier, type]);
+
+    let uuid = mediaMap[mediaKey];
+    if (!uuid) {
+      uuid = (entry["uuid"] as string) || crypto.randomUUID();
+      mediaMap[mediaKey] = uuid;
+    }
+
+    entryUuids.set(entry, uuid);
+    allUuids.add(uuid);
+  }
+
+  // 3. Batch read existing UUID details, date arrays, and type properties
+  const uniqueDates = [
+    ...new Set(validEntries.map((e) => String(e["date"]))),
+  ];
+  const keysToFetch = [...allUuids, ...uniqueDates, ...uniqueTypes];
+  const preloaded = await browser.storage.local.get(keysToFetch);
+
+  // 4. In-memory updates for types, details, dates, and stats
+  const storageToWrite: Record<string, unknown> = {};
+
+  // Types list & type dictionaries
+  storageToWrite["types"] = typesList;
+  for (const type of uniqueTypes) {
+    if (!preloaded[type] || typeof preloaded[type] !== "object") {
+      storageToWrite[type] = {};
+    }
+  }
+
+  // Media map
+  storageToWrite["media"] = mediaMap;
+
+  // UUID details
+  const detailsByUuid: Record<string, any> = {};
+  for (const uuid of allUuids) {
+    detailsByUuid[uuid] = preloaded[uuid]
+      ? { ...preloaded[uuid] }
+      : {
+          last_line_added: -1,
+        };
+  }
+
+  // Date entries: date -> [[client, uuid], ...]
+  const dateEntriesByDate: Record<string, [string, string][]> = {};
+  for (const date of uniqueDates) {
+    const existingEntries = Array.isArray(preloaded[date])
+      ? preloaded[date].map(([c, u]: [string, string]) => [String(c), String(u)])
+      : [];
+    dateEntriesByDate[date] = existingEntries;
+  }
+
+  // Process rows
+  const dailyStatsToWrite: Record<string, Stat> = {};
+
+  for (const entry of validEntries) {
+    const uuid = entryUuids.get(entry)!;
+    const date = String(entry["date"]);
+    const client = (entry["client"] as string) || defaultClient;
+    const givenIdentifier = String(entry["given_identifier"]);
+    const type = String(entry["type"]);
+
+    // Update details
+    const details = detailsByUuid[uuid];
+    details.given_identifier = details.given_identifier ?? givenIdentifier;
+    details.type = details.type ?? type;
+    if (entry.hasOwnProperty("name") && entry["name"]) {
+      details.name = String(entry["name"]);
+    } else if (!details.name) {
+      details.name = givenIdentifier;
+    }
+
+    // Update date arrays & immersion dates
+    immersionDatesSet.add(date);
+    const dayEntries = dateEntriesByDate[date];
+    const alreadyPresent = dayEntries.some(
+      ([c, u]) => c === client && u === uuid,
+    );
+    if (!alreadyPresent) {
+      dayEntries.push([client, uuid]);
+    }
+
+    // Daily stats
+    const stats: Stat = { chars_read: 0, time_read: 0 };
     if (
-      !entry.hasOwnProperty("type") ||
-      !entry.hasOwnProperty("date") ||
-      !entry.hasOwnProperty("given_identifier")
+      entry.hasOwnProperty("chars_read") &&
+      entry["chars_read"] !== undefined
     ) {
-      continue; // was: return — which killed the whole import on a single bad row (e.g. trailing empty CSV row)
+      stats.chars_read = Number(entry["chars_read"]) || 0;
+    }
+    if (
+      entry.hasOwnProperty("lines_read") &&
+      entry["lines_read"] !== undefined
+    ) {
+      stats.lines_read = Number(entry["lines_read"]) || 0;
+    }
+    if (
+      entry.hasOwnProperty("time_read") &&
+      entry["time_read"] !== undefined
+    ) {
+      stats.time_read = Number(entry["time_read"]) || 0;
     }
 
-    const type_storage = await TypeStorage.buildTypeStorage(
-      entry["type"] as string,
-    );
-    const uuid = await type_storage.addMedia(
-      entry["given_identifier"] as string,
-      entry["uuid"] as string | undefined,
-    );
+    const statKey = JSON.stringify([client, uuid, date]);
+    dailyStatsToWrite[statKey] = stats;
+  }
 
-    let stats: Stat = { chars_read: 0, time_read: 0 };
-    if (entry.hasOwnProperty("chars_read")) {
-      stats.chars_read = entry["chars_read"] as number;
-    }
-    if (entry.hasOwnProperty("lines_read")) {
-      stats.lines_read = entry["lines_read"] as number;
-    }
-    if (entry.hasOwnProperty("time_read")) {
-      stats.time_read = entry["time_read"] as number;
-    }
+  // Finalize metadata and details in storageToWrite
+  storageToWrite["immersion_dates"] = Array.from(immersionDatesSet);
+  for (const [uuid, details] of Object.entries(detailsByUuid)) {
+    storageToWrite[uuid] = details;
+  }
+  for (const [date, entries] of Object.entries(dateEntriesByDate)) {
+    storageToWrite[date] = entries;
+  }
 
-    const instance_storage = await InstanceStorage.buildInstance(uuid);
-
-    if (entry.hasOwnProperty("name")) {
-      await instance_storage.updateDetails({
-        name: entry["name"] as string | undefined,
-      });
-    }
-
-    await instance_storage.addToDates(entry["date"] as string);
-    await instance_storage.addToDate(
-      entry["date"] as string,
-      entry["client"] as string,
-    );
-
-    if (Object.keys(stats).length !== 0) {
-      await instance_storage.setDailyStats(
-        entry["date"] as string,
-        stats,
-        entry["client"] as string,
-      );
-    }
+  // 5. Batch write to storage
+  await batchSet(storageToWrite, 500);
+  if (Object.keys(dailyStatsToWrite).length > 0) {
+    await batchSet(dailyStatsToWrite, 500);
   }
 }
 

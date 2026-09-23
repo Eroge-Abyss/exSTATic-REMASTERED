@@ -10,6 +10,7 @@
     minWidth?: string;
     onclose?: () => void;
     children?: Snippet;
+    headerIcon?: Snippet;
   }
 
   let {
@@ -20,6 +21,7 @@
     minWidth = "13rem",
     onclose,
     children,
+    headerIcon,
   }: Props = $props();
 
   let menuEl = $state<HTMLDivElement | null>(null);
@@ -87,7 +89,10 @@
     transition:scale={{ duration: 120, start: 0.96 }}
   >
     {#if title}
-      <div class="ctx-header flex items-center justify-between px-3 py-1.5 text-xs font-semibold">
+      <div class="ctx-header flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold">
+        {#if headerIcon}
+          {@render headerIcon()}
+        {/if}
         <span>{title}</span>
       </div>
     {/if}

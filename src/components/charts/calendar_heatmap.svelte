@@ -229,6 +229,7 @@
         {#each range(7) as day_num}
           {@const dateStr = cellToDateStr(week_num, day_num)}
           <!-- svelte-ignore a11y_no_static_element_interactions -->
+          <!-- svelte-ignore a11y_click_events_have_key_events -->
           <rect
             x={x_scale(week_num.toString())}
             y={y_scale(day_num.toString())}
@@ -238,6 +239,11 @@
             fill-opacity="1"
             stroke-width="3"
             style={dateStr ? "cursor: pointer;" : "pointer-events: none;"}
+            onclick={() => {
+              if (!selectable && dateStr && onDayClick) {
+                onDayClick(dateStr);
+              }
+            }}
             oncontextmenu={(e) => {
               if (dateStr && onDayContextMenu) {
                 e.preventDefault();

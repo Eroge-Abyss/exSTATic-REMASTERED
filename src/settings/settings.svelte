@@ -1,5 +1,6 @@
 <script lang="ts">
   import MenuOption from "../components/interface/menu_option.svelte";
+  import SettingRow from "../components/interface/setting_row.svelte";
   import type { MokuroStorage } from "../mokuro/mokuro_storage";
   import type { TTUStorage } from "../ttu/ttu_storage";
   import { VNStorage } from "../vn/vn_storage";
@@ -7,15 +8,47 @@
   import { onMount } from "svelte";
   import { applyTheme, setTheme } from "../themes/apply_theme";
   import { themeList, type ThemeId } from "../themes/themes";
+  import { exportLines, exportStats } from "../data_wrangling/data_export";
+  import { importLines, importStats } from "../data_wrangling/data_import";
+  import type { DataEntry } from "../data_wrangling/data_extraction";
+  import { parse } from "papaparse";
 
-  let type = $state("vn");
+  let type = $state("global");
   let disableAnimations = $state(false);
+  let showTexthookerWs = $state(true);
+  let showTadokuWs = $state(true);
   let currentTheme = $state<ThemeId>("dark");
+  let selectedTheme = $derived(themeList.find((t) => t.id === currentTheme));
+  let isThemeDropdownOpen = $state(false);
+  let dropdownRef: HTMLDivElement | undefined = $state();
+
+  const handleClickOutside = (event: MouseEvent) => {
+    if (isThemeDropdownOpen && dropdownRef && !dropdownRef.contains(event.target as Node)) {
+      isThemeDropdownOpen = false;
+    }
+  };
 
   onMount(async () => {
     currentTheme = await applyTheme();
-    const data = await browser.storage.local.get("disable_animations");
+    const data = await browser.storage.local.get([
+      "disable_animations",
+      "show_texthooker_ws",
+      "show_tadoku_ws",
+      "show_websocket_icons",
+    ]);
     disableAnimations = !!data.disable_animations;
+    showTexthookerWs =
+      data.show_texthooker_ws !== undefined
+        ? !!data.show_texthooker_ws
+        : (data.show_websocket_icons !== undefined ? !!data.show_websocket_icons : true);
+    showTadokuWs =
+      data.show_tadoku_ws !== undefined
+        ? !!data.show_tadoku_ws
+        : (data.show_websocket_icons !== undefined ? !!data.show_websocket_icons : true);
+    window.addEventListener("click", handleClickOutside);
+    return () => {
+      window.removeEventListener("click", handleClickOutside);
+    };
   });
 
   const toggleAnimations = async () => {
@@ -23,9 +56,88 @@
     await browser.storage.local.set({ disable_animations: disableAnimations });
   };
 
+  const toggleTexthookerWs = async () => {
+    showTexthookerWs = !showTexthookerWs;
+    await browser.storage.local.set({
+      show_texthooker_ws: showTexthookerWs,
+    });
+  };
+
+  const toggleTadokuWs = async () => {
+    showTadokuWs = !showTadokuWs;
+    await browser.storage.local.set({
+      show_tadoku_ws: showTadokuWs,
+    });
+  };
+
   const handleThemeChange = async (newTheme: ThemeId) => {
     currentTheme = newTheme;
     await setTheme(newTheme);
+  };
+
+  let statsFileInput: HTMLInputElement | undefined = $state();
+  let linesFileInput: HTMLInputElement | undefined = $state();
+
+  const requestExportLines = async () => {
+    const confirmed = confirm(
+      "Are you sure you'd like to export lines?\nExporting large numbers of lines can take a long time, please wait and do not retry whilst the operation takes place...",
+    );
+
+    if (confirmed) {
+      await exportLines();
+    }
+  };
+
+  const requestImportStats = (event: Event) => {
+    const file = (event.target as HTMLInputElement).files?.[0];
+    if (!file) return;
+
+    const confirmed = confirm(
+      "Are you sure you'd like to import stats?\nThe imported stats will replace conflicting entries (i.e. on the same days for the same media)...\nIt is highly recommended to BACKUP (export) data regularly in case anything goes wrong (i.e. before importing)!",
+    );
+
+    if (!confirmed) {
+      (event.target as HTMLInputElement).value = "";
+      return;
+    }
+
+    parse(file, {
+      header: true,
+      dynamicTyping: true,
+      complete: async (result) => {
+        await importStats(result.data as DataEntry[]);
+        alert(
+          "Finished importing stats successfully!\nPlease refresh all exSTATic pages now...",
+        );
+        (event.target as HTMLInputElement).value = "";
+      },
+    });
+  };
+
+  const requestImportLines = (event: Event) => {
+    const file = (event.target as HTMLInputElement).files?.[0];
+    if (!file) return;
+
+    const confirmed = confirm(
+      "Are you sure you'd like to import lines?\n Please ensure that ALL stats are up to date beforehand (import if necessary).\nThe imported lines will be inserted after the current ones in storage...\nIt is highly recommended to BACKUP (export) data regularly in case anything goes wrong (i.e. before importing)!",
+    );
+
+    if (!confirmed) {
+      (event.target as HTMLInputElement).value = "";
+      return;
+    }
+
+    parse(file, {
+      header: true,
+      dynamicTyping: true,
+      complete: async (result) => {
+        await importLines(result.data as { [key: string]: string | number }[]);
+        alert(
+          "Finished importing lines successfully!\nPlease refresh all exSTATic pages now...",
+        );
+        (event.target as HTMLInputElement).value = "";
+      },
+    });
   };
 
   interface Props {
@@ -40,16 +152,26 @@
 <div class="flex flex-col gap-10 px-20">
   <div
     id="top_bar"
-    class="sticky top-0 z-50 flex h-20 justify-center"
+    class="sticky top-0 z-50 flex flex-col items-center justify-center py-4 gap-2.5"
   >
-    <div class="flex flex-row place-items-center gap-3">
-      <p class="header-text">Settings</p>
-      <select class="bg-button text-white rounded px-2 py-1 font-medium outline-none" bind:value={type}>
-        <option value="vn">VN</option>
-        <option value="mokuro">Mokuro</option>
-        <option value="ttu">TTU</option>
-        <option value="global">Global Dash</option>
-      </select>
+    <p class="header-text">Settings</p>
+    <div class="flex items-center gap-1 rounded-lg bg-block p-1 border border-dim shadow-sm">
+      {#each [
+        { id: 'global', label: 'Global Dash' },
+        { id: 'vn', label: 'VN' },
+        { id: 'mokuro', label: 'Mokuro' },
+        { id: 'ttu', label: 'TTU' }
+      ] as tab}
+        <button
+          type="button"
+          class="rounded-md px-3 py-1 text-xs font-semibold uppercase tracking-wider transition-all cursor-pointer {type === tab.id
+            ? 'bg-button text-white shadow-sm'
+            : 'text-text hover:text-white hover:bg-hover/50'}"
+          onclick={() => (type = tab.id)}
+        >
+          {tab.label}
+        </button>
+      {/each}
     </div>
   </div>
 </div>
@@ -148,27 +270,73 @@
       value="120"
     />
   {:else if type === "global"}
-    <div class="menu-label text-xl">Theme</div>
-    <div class="menu-input flex flex-wrap items-center justify-end gap-2.5 p-4">
-      {#each themeList as theme}
+    <SettingRow label="Theme">
+      <div class="relative" bind:this={dropdownRef}>
         <button
-          class="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-all {currentTheme === theme.id
-            ? 'bg-button ring-2 ring-white/40'
-            : 'bg-backdrop text-text hover:text-white'}"
-          style={currentTheme === theme.id ? 'color: var(--exs-accent-text, #ffffff);' : ''}
-          onclick={() => handleThemeChange(theme.id)}
+          type="button"
+          class="flex items-center gap-3 rounded-lg bg-backdrop px-4 py-2.5 text-sm font-medium text-text border border-dim shadow-sm transition-all hover:text-white hover:border-accent min-w-[210px] justify-between cursor-pointer"
+          onclick={(e) => {
+            e.stopPropagation();
+            isThemeDropdownOpen = !isThemeDropdownOpen;
+          }}
+          aria-expanded={isThemeDropdownOpen}
         >
-          <span
-            class="inline-block h-3.5 w-3.5 rounded-full border shadow-sm"
-            style="background: linear-gradient(135deg, {theme.background} 50%, {theme.primary} 50%); border-color: {theme.accent};"
-          ></span>
-          {theme.name}
+          <div class="flex items-center gap-2.5">
+            {#if selectedTheme}
+              <span
+                class="inline-block h-4 w-4 rounded-full border shadow-sm flex-shrink-0"
+                style="background: linear-gradient(135deg, {selectedTheme.background} 50%, {selectedTheme.primary} 50%); border-color: {selectedTheme.accent};"
+              ></span>
+              <span class="text-white font-semibold">{selectedTheme.name}</span>
+            {/if}
+          </div>
+          <svg
+            class="h-4 w-4 text-muted transition-transform duration-200 {isThemeDropdownOpen ? 'rotate-180' : ''}"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+          >
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+          </svg>
         </button>
-      {/each}
-    </div>
 
-    <div class="menu-label text-xl">Disable Dashboard Animations</div>
-    <div class="menu-input flex items-center justify-end p-4">
+        {#if isThemeDropdownOpen}
+          <div
+            class="absolute right-0 top-full mt-2 w-56 rounded-xl border shadow-2xl z-50 py-1.5 overflow-hidden backdrop-blur-md"
+            style="background: var(--exs-block, #0f172a); border-color: var(--exs-border, #334155);"
+          >
+            {#each themeList as theme}
+              <button
+                type="button"
+                class="w-full flex items-center justify-between px-3.5 py-2.5 text-sm font-medium transition-colors text-left cursor-pointer {currentTheme === theme.id
+                  ? 'bg-button text-white font-semibold'
+                  : 'text-text hover:bg-hover hover:text-white'}"
+                style={currentTheme === theme.id ? 'color: var(--exs-accent-text, #ffffff);' : ''}
+                onclick={() => {
+                  handleThemeChange(theme.id);
+                  isThemeDropdownOpen = false;
+                }}
+              >
+                <div class="flex items-center gap-2.5">
+                  <span
+                    class="inline-block h-3.5 w-3.5 rounded-full border shadow-sm flex-shrink-0"
+                    style="background: linear-gradient(135deg, {theme.background} 50%, {theme.primary} 50%); border-color: {theme.accent};"
+                  ></span>
+                  <span>{theme.name}</span>
+                </div>
+                {#if currentTheme === theme.id}
+                  <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7" />
+                  </svg>
+                {/if}
+              </button>
+            {/each}
+          </div>
+        {/if}
+      </div>
+    </SettingRow>
+
+    <SettingRow label="Disable Dashboard Animations">
       <button
         class="rounded-lg px-6 py-2 font-medium transition-colors {disableAnimations
           ? 'bg-button text-white hover:bg-hover'
@@ -179,7 +347,90 @@
           ? "ON (Animations Disabled)"
           : "OFF (Animations Enabled)"}
       </button>
-    </div>
+    </SettingRow>
+
+    <SettingRow label="Tracker WebSocket Icons" inputClass="gap-3">
+      <button
+        type="button"
+        class="inline-flex items-center gap-2 rounded-lg px-4 py-2 font-medium transition-all cursor-pointer {showTexthookerWs
+          ? 'bg-button text-white shadow-sm hover:bg-hover'
+          : 'bg-backdrop text-text opacity-40 hover:opacity-70'}"
+        onclick={toggleTexthookerWs}
+        title={showTexthookerWs ? "Texthooker: visible (click to hide)" : "Texthooker: hidden (click to show)"}
+      >
+        <span class="material-icons text-base">electrical_services</span>
+        <span>Texthooker</span>
+      </button>
+
+      <button
+        type="button"
+        class="inline-flex items-center gap-2 rounded-lg px-4 py-2 font-medium transition-all cursor-pointer {showTadokuWs
+          ? 'bg-button text-white shadow-sm hover:bg-hover'
+          : 'bg-backdrop text-text opacity-40 hover:opacity-70'}"
+        onclick={toggleTadokuWs}
+        title={showTadokuWs ? "Tadoku: visible (click to hide)" : "Tadoku: hidden (click to show)"}
+      >
+        <span class="relative inline-flex items-center">
+          <span class="material-icons text-base">electrical_services</span>
+          <span class="ws-badge">多</span>
+        </span>
+        <span>Tadoku</span>
+      </button>
+    </SettingRow>
+
+    <SettingRow label="Export Data" inputClass="gap-3">
+      <button
+        type="button"
+        class="inline-flex items-center gap-2 rounded-lg bg-backdrop px-4 py-2 font-medium text-text border border-dim shadow-sm transition-all hover:bg-hover hover:text-white cursor-pointer"
+        onclick={exportStats}
+      >
+        <span class="material-icons text-base">download</span>
+        <span>Export Stats</span>
+      </button>
+
+      <button
+        type="button"
+        class="inline-flex items-center gap-2 rounded-lg bg-backdrop px-4 py-2 font-medium text-text border border-dim shadow-sm transition-all hover:bg-hover hover:text-white cursor-pointer"
+        onclick={requestExportLines}
+      >
+        <span class="material-icons text-base">download</span>
+        <span>Export Lines</span>
+      </button>
+    </SettingRow>
+
+    <SettingRow label="Import Data" inputClass="gap-3">
+      <button
+        type="button"
+        class="inline-flex items-center gap-2 rounded-lg bg-backdrop px-4 py-2 font-medium text-text border border-dim shadow-sm transition-all hover:bg-hover hover:text-white cursor-pointer"
+        onclick={() => statsFileInput?.click()}
+      >
+        <span class="material-icons text-base">upload</span>
+        <span>Import Stats</span>
+      </button>
+      <input
+        bind:this={statsFileInput}
+        class="hidden"
+        type="file"
+        accept=".csv"
+        onchange={requestImportStats}
+      />
+
+      <button
+        type="button"
+        class="inline-flex items-center gap-2 rounded-lg bg-backdrop px-4 py-2 font-medium text-text border border-dim shadow-sm transition-all hover:bg-hover hover:text-white cursor-pointer"
+        onclick={() => linesFileInput?.click()}
+      >
+        <span class="material-icons text-base">upload</span>
+        <span>Import Lines</span>
+      </button>
+      <input
+        bind:this={linesFileInput}
+        class="hidden"
+        type="file"
+        accept=".csv"
+        onchange={requestImportLines}
+      />
+    </SettingRow>
   {/if}
 </div>
 
@@ -201,6 +452,10 @@
     border-bottom: 1px solid var(--exs-border, transparent);
   }
 
+  .border-dim {
+    border-color: var(--exs-border-dim, #1e293b);
+  }
+
   .menu-input {
     @apply col-start-2 grow bg-menu p-1 text-menu-text;
     border: 1px solid var(--exs-border, transparent);
@@ -219,5 +474,18 @@
   .header-icon {
     @apply h-full cursor-pointer hover:bg-hover hover:text-icon;
     color: var(--exs-title, #818cf8);
+  }
+
+  .ws-badge {
+    position: absolute;
+    bottom: -2px;
+    right: -4px;
+    font-size: 9px;
+    font-weight: 700;
+    line-height: 1;
+    background: var(--exs-block, #0f172a);
+    border-radius: 2px;
+    padding: 0 1px;
+    color: var(--exs-accent, #818cf8);
   }
 </style>

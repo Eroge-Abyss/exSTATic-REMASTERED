@@ -8,6 +8,7 @@
     media_storage: MediaStorage;
     active?: boolean;
     show_lines?: boolean;
+    collapsed?: boolean;
     children?: import("svelte").Snippet;
   }
 
@@ -15,6 +16,7 @@
     media_storage,
     active = $bindable(false),
     show_lines = true,
+    collapsed = false,
     children,
   }: Props = $props();
 
@@ -74,36 +76,60 @@
   });
 </script>
 
-<div class="menu-bar z-50 flex h-full flex-row items-center gap-3 p-3 text-black" style="color: #000000;">
-  <div id="chars_read" class="stat-numbers">{chars}</div>
-  <div class="stat-annotation">Chars</div>
-  <span class="material-icons">auto_stories</span>
+<div
+  class="menu-bar z-50 flex flex-row items-center text-black {collapsed ? 'collapsed' : 'h-full'}"
+  style="color: #000000;"
+>
+  <div
+    class="stats-content flex flex-row items-center gap-3 overflow-hidden whitespace-nowrap {collapsed ? 'collapsed' : ''}"
+  >
+    <div id="chars_read" class="stat-numbers">{chars}</div>
+    <div class="stat-annotation">Chars</div>
+    <span class="material-icons">auto_stories</span>
 
-  {#if show_lines}
-    <div id="lines_read" class="stat-numbers">{lines}</div>
-    <div class="stat-annotation">Lines</div>
-    <span class="material-icons">drive_file_rename_outline</span>
-  {/if}
-
-  <div id="elapsed_time" class="stat-numbers">{time}</div>
-  <div class="stat-annotation">Elapsed</div>
-  <span class="material-icons">timer</span>
-
-  <div id="chars_per_hour" class="stat-numbers">{speed}</div>
-  <div class="stat-annotation">Chars / Hour</div>
-
-  <span id="activity_symbol" class="material-icons">
-    {#if active}
-      hourglass_bottom
-    {:else}
-      bedtime
+    {#if show_lines}
+      <div id="lines_read" class="stat-numbers">{lines}</div>
+      <div class="stat-annotation">Lines</div>
+      <span class="material-icons">drive_file_rename_outline</span>
     {/if}
-  </span>
+
+    <div id="elapsed_time" class="stat-numbers">{time}</div>
+    <div class="stat-annotation">Elapsed</div>
+    <span class="material-icons">timer</span>
+
+    <div id="chars_per_hour" class="stat-numbers">{speed}</div>
+    <div class="stat-annotation">Chars / Hour</div>
+
+    <span id="activity_symbol" class="material-icons">
+      {#if active}
+        hourglass_bottom
+      {:else}
+        bedtime
+      {/if}
+    </span>
+  </div>
 
   {@render children?.()}
 </div>
 
 <style>
+  .stats-content {
+    max-width: 1200px;
+    opacity: 1;
+    min-width: 0;
+    transition: max-width 0.35s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.25s ease, margin 0.35s ease;
+  }
+
+  .stats-content.collapsed {
+    max-width: 0 !important;
+    width: 0 !important;
+    min-width: 0 !important;
+    opacity: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    pointer-events: none !important;
+  }
+
   .stat-numbers {
     font-family: "ui-monospace", "SFMono-Regular", "Menlo", "Monaco", "Consolas",
       "Liberation Mono", "Courier New", "monospace";

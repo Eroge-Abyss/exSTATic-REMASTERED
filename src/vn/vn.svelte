@@ -1,16 +1,12 @@
 <script lang="ts">
+  import { onMount } from "svelte";
   import * as browser from "webextension-polyfill";
   import { timeToDateString } from "../calculations";
   import type { VNStorage } from "./vn_storage";
-  import { exportLines, exportStats } from "../data_wrangling/data_export";
-  import { importLines, importStats } from "../data_wrangling/data_import";
   import StatBar from "../components/interface/stat_bar.svelte";
   import MenuBar from "../components/interface/menu_bar.svelte";
   import MenuOption from "../components/interface/menu_option.svelte";
   import LineHolder from "../components/interface/line_holder.svelte";
-
-  import { parse } from "papaparse";
-  import type { DataEntry } from "../data_wrangling/data_extraction";
   import { applyTheme } from "../themes/apply_theme";
 
   applyTheme();
@@ -25,6 +21,52 @@
   let menu = $state(false);
   let lunaConnected = $state(false);
   let tadokuConnected = $state(false);
+  let showTexthookerWs = $state(true);
+  let showTadokuWs = $state(true);
+  let barHidden = $state(false);
+  let restoreClickTimeout: any = null;
+  let restoreClickCount = 0;
+
+  onMount(async () => {
+    document.documentElement.style.setProperty("--default-menu-blur", "0");
+
+    const raw = await browser.storage.local.get([
+      "show_texthooker_ws",
+      "show_tadoku_ws",
+      "show_websocket_icons",
+    ]);
+    showTexthookerWs =
+      raw.show_texthooker_ws !== undefined
+        ? !!raw.show_texthooker_ws
+        : (raw.show_websocket_icons !== undefined ? !!raw.show_websocket_icons : true);
+    showTadokuWs =
+      raw.show_tadoku_ws !== undefined
+        ? !!raw.show_tadoku_ws
+        : (raw.show_websocket_icons !== undefined ? !!raw.show_websocket_icons : true);
+
+    const storageListener = (
+      changes: Record<string, browser.Storage.StorageChange>,
+    ) => {
+      if (changes.show_texthooker_ws !== undefined) {
+        showTexthookerWs = !!changes.show_texthooker_ws.newValue;
+      }
+      if (changes.show_tadoku_ws !== undefined) {
+        showTadokuWs = !!changes.show_tadoku_ws.newValue;
+      }
+      if (changes.show_websocket_icons !== undefined) {
+        if (changes.show_texthooker_ws === undefined) {
+          showTexthookerWs = !!changes.show_websocket_icons.newValue;
+        }
+        if (changes.show_tadoku_ws === undefined) {
+          showTadokuWs = !!changes.show_websocket_icons.newValue;
+        }
+      }
+    };
+    browser.storage.onChanged.addListener(storageListener);
+    return () => {
+      browser.storage.onChanged.removeListener(storageListener);
+    };
+  });
 
   document.addEventListener("ws_status", (event: CustomEvent) => {
     if (event.detail.luna !== undefined) lunaConnected = event.detail.luna;
@@ -66,53 +108,6 @@
     setTitle(title);
   });
 
-  const requestExportLines = async () => {
-    const confirmed = confirm(
-      "Are you sure you'd like to export lines?\nExporting large numbers of lines can take a long time, please wait and do not retry whilst the operation takes place...",
-    );
-
-    if (confirmed) {
-      await exportLines();
-    }
-  };
-
-  const requestImportStats = (event: Event) => {
-    const confirmed = confirm(
-      "Are you sure you'd like to import stats?\nThe imported stats will replace conflicting entries (i.e. on the same days for the same media)...\nIt is highly recommended to BACKUP (export) data regularly in case anything goes wrong (i.e. before importing)!",
-    );
-
-    if (!confirmed) return;
-
-    parse((event.target as HTMLInputElement).files![0], {
-      header: true,
-      dynamicTyping: true,
-      complete: async (result) => {
-        await importStats(result.data as DataEntry[]);
-        alert(
-          "Finished importing stats successfully!\nPlease refresh all exSTATic pages now...",
-        );
-      },
-    });
-  };
-
-  const requestImportLines = (event: Event) => {
-    const confirmed = confirm(
-      "Are you sure you'd like to import lines?\n Please ensure that ALL stats are up to date beforehand (import if necessary).\nThe imported lines will be inserted after the current ones in storage...\nIt is highly recommended to BACKUP (export) data regularly in case anything goes wrong (i.e. before importing)!",
-    );
-
-    if (!confirmed) return;
-
-    parse((event.target as HTMLInputElement).files![0], {
-      header: true,
-      dynamicTyping: true,
-      complete: async (result) => {
-        await importLines(result.data as { [key: string]: string | number }[]);
-        alert(
-          "Finished importing lines successfully!\nPlease refresh all exSTATic pages now...",
-        );
-      },
-    });
-  };
 
   const openStats = () => {
     browser.runtime.sendMessage({
@@ -121,17 +116,56 @@
     });
   };
 
+  const handleHideBar = () => {
+    menu = false;
+    barHidden = true;
+  };
+
+  const handleDotsClick = () => {
+    if (barHidden) {
+      restoreClickCount++;
+      if (restoreClickCount === 1) {
+        clearTimeout(restoreClickTimeout);
+        restoreClickTimeout = setTimeout(() => {
+          restoreClickCount = 0;
+        }, 2000);
+      } else if (restoreClickCount >= 2) {
+        clearTimeout(restoreClickTimeout);
+        restoreClickCount = 0;
+        barHidden = false;
+      }
+    } else {
+      menu = !menu;
+    }
+  };
+
+  const handleDotsDblClick = () => {
+    if (barHidden) {
+      clearTimeout(restoreClickTimeout);
+      restoreClickCount = 0;
+      barHidden = false;
+    }
+  };
+
   document.addEventListener("status_active", () => {
     document.documentElement.style.setProperty(
       "--default-inactivity-blur",
       "0",
+    );
+    document.documentElement.style.setProperty(
+      "--default-menu-blur",
+      (vn_storage.properties["menu_blur"] ?? 8) + "px",
     );
   });
 
   document.addEventListener("status_inactive", () => {
     document.documentElement.style.setProperty(
       "--default-inactivity-blur",
-      vn_storage.properties["inactivity_blur"] + "px",
+      (vn_storage.properties["inactivity_blur"] ?? 2) + "px",
+    );
+    document.documentElement.style.setProperty(
+      "--default-menu-blur",
+      "0",
     );
   });
 
@@ -176,18 +210,38 @@
   />
   <div class="flex items-center gap-3">
     <div class="relative">
-      <StatBar media_storage={vn_storage}>
-        <span class="ws-plug-wrap" class:connected={lunaConnected} title={lunaConnected ? "Luna: connected" : "Luna: disconnected"}>
-          <span class="material-icons ws-plug">electrical_services</span>
-        </span>
-        <span class="ws-plug-wrap" class:connected={tadokuConnected} title={tadokuConnected ? "Tadoku: connected" : "Tadoku: disconnected"}>
-          <span class="material-icons ws-plug">electrical_services</span>
-          <span class="ws-badge">多</span>
-        </span>
+      <StatBar media_storage={vn_storage} collapsed={barHidden}>
+        {#if showTexthookerWs || showTadokuWs}
+          <div
+            class="ws-icons-wrap flex items-center gap-3 whitespace-nowrap {barHidden ? 'collapsed' : ''}"
+          >
+            {#if showTexthookerWs}
+              <span
+                class="ws-plug-wrap"
+                class:connected={lunaConnected}
+                title={lunaConnected ? "Texthooker: connected" : "Texthooker: disconnected"}
+              >
+                <span class="material-icons ws-plug">electrical_services</span>
+              </span>
+            {/if}
+            {#if showTadokuWs}
+              <span
+                class="ws-plug-wrap"
+                class:connected={tadokuConnected}
+                title={tadokuConnected ? "Tadoku: connected" : "Tadoku: disconnected"}
+              >
+                <span class="material-icons ws-plug">electrical_services</span>
+                <span class="ws-badge">多</span>
+              </span>
+            {/if}
+          </div>
+        {/if}
         <button
-          class="material-icons rounded-full hover:bg-hover"
-          onclick={() => (menu = !menu)}>more_vert</button
-        >
+          class="material-icons rounded-full hover:bg-hover cursor-pointer"
+          onclick={handleDotsClick}
+          ondblclick={handleDotsDblClick}
+          title={barHidden ? "Click twice to show bar" : "Settings"}
+        >more_vert</button>
       </StatBar>
       <MenuBar show={menu} media_storage={vn_storage}>
       <MenuOption
@@ -252,38 +306,11 @@
       >
         Settings
       </button>
-      <button id="export_stats" class="menu-button" onclick={exportStats}
-        >Export Stats</button
-      >
-      <button id="export_lines" class="menu-button" onclick={requestExportLines}
-        >Export Lines</button
-      >
-      <button
-        class="menu-button"
-        onclick={() => document.getElementById("import_stats")?.click()}
-      >
-        Import Stats
-        <input
-          id="import_stats"
-          class="hidden"
-          type="file"
-          onchange={requestImportStats}
-        />
-      </button>
-      <button
-        class="menu-button"
-        onclick={() => document.getElementById("import_lines")?.click()}
-      >
-        Import Lines
-        <input
-          id="import_lines"
-          class="hidden"
-          type="file"
-          onchange={requestImportLines}
-        />
-      </button>
       <button id="view_stats" class="menu-button" onclick={openStats}
         >View Stats</button
+      >
+      <button id="hide_bar" class="menu-button" onclick={handleHideBar}
+        >Hide Bar</button
       >
     </MenuBar>
     </div>
@@ -374,6 +401,29 @@
   .menu-bar:hover {
     background: color-mix(in srgb, var(--exs-accent) 85%, transparent);
   }
+  .menu-bar.collapsed {
+    gap: 0 !important;
+    padding: 2px !important;
+    filter: none !important;
+    border-radius: 9999px;
+  }
+
+  .ws-icons-wrap {
+    max-width: 200px;
+    opacity: 1;
+    min-width: 0;
+    transition: max-width 0.35s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.25s ease, margin 0.35s ease;
+  }
+  .ws-icons-wrap.collapsed {
+    overflow: hidden !important;
+    max-width: 0 !important;
+    width: 0 !important;
+    min-width: 0 !important;
+    opacity: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    pointer-events: none !important;
+  }
 
   .menu-button {
     @apply col-span-2 bg-block p-4 text-left text-icon hover:bg-hover;
@@ -412,5 +462,7 @@
     font-family: system-ui, sans-serif;
     line-height: 1;
     opacity: 0.85;
+    pointer-events: none;
+    user-select: none;
   }
 </style>
