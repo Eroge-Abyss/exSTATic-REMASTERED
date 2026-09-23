@@ -4,7 +4,7 @@
   import CalendarHeatmap from "../components/charts/calendar_heatmap.svelte";
   import ContextMenu from "../components/interface/context_menu.svelte";
   import DateRangePicker from "../components/interface/date_range_picker.svelte";
-  import { fade, slide } from "svelte/transition";
+  import { fade, slide, scale } from "svelte/transition";
   import { tweened } from "svelte/motion";
   import { cubicOut } from "svelte/easing";
 
@@ -517,6 +517,21 @@
     showFilterPanel = !showFilterPanel;
   }
 
+  function handleFilterKeydown(e: KeyboardEvent) {
+    if (e.key === "Escape" && showFilterPanel) {
+      showFilterPanel = false;
+    }
+  }
+
+  $effect(() => {
+    if (typeof window !== "undefined") {
+      window.addEventListener("keydown", handleFilterKeydown);
+      return () => {
+        window.removeEventListener("keydown", handleFilterKeydown);
+      };
+    }
+  });
+
   async function handleSoftDelete(uuid: string) {
     await softDeleteGame(uuid);
     confirmDeleteUuid = null;
@@ -745,6 +760,13 @@
   let allGameNames = $derived(
     Array.from(new Set(yearMediaData.map((d) => d.name))).sort(),
   );
+
+  let filterSearchQuery = $state("");
+  let displayedFilterGames = $derived.by(() => {
+    const q = filterSearchQuery.trim().toLowerCase();
+    if (!q) return allGameNames;
+    return allGameNames.filter((name) => (name ?? "").toLowerCase().includes(q));
+  });
 
   let filteredData = $derived(
     yearMediaData.filter((d) => selectedGames.has(d.name)),
@@ -1997,10 +2019,26 @@
     </div>
   </div>
 
-  <!-- Game Filter Panel -->
+  <!-- Game Filter Popup Menu -->
   {#if showFilterPanel}
-    <div class="panel">
-      <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
+    <!-- Backdrop overlay: clicking anywhere outside closes the popup -->
+    <!-- svelte-ignore a11y_click_events_have_key_events -->
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div
+      class="fixed inset-0 z-40 bg-black/25 backdrop-blur-[1px]"
+      onclick={() => (showFilterPanel = false)}
+      transition:fade={{ duration: 150 }}
+    ></div>
+
+    <!-- Filter Popup Card -->
+    <!-- svelte-ignore a11y_click_events_have_key_events -->
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div
+      class="filter-popup fixed z-50 top-[5.25rem] right-4 sm:right-20 w-[92vw] max-w-xl rounded-xl p-5 shadow-2xl flex flex-col gap-3.5"
+      onclick={(e) => e.stopPropagation()}
+      transition:scale={{ duration: 150, start: 0.95 }}
+    >
+      <div class="flex flex-wrap items-center justify-between gap-3 border-b border-dim pb-3">
         <div class="flex items-center gap-2.5">
           <h2 class="text-base sm:text-lg font-semibold tracking-tight text-title">Filter Games</h2>
           <span class="count-badge">
@@ -2020,10 +2058,52 @@
             </svg>
             <span>Deselect All</span>
           </button>
+          <button
+            class="btn-action ml-1"
+            onclick={() => (showFilterPanel = false)}
+            title="Close filter"
+            aria-label="Close filter"
+          >
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="18" y1="6" x2="6" y2="18"></line>
+              <line x1="6" y1="6" x2="18" y2="18"></line>
+            </svg>
+          </button>
         </div>
       </div>
-      <div class="flex flex-wrap gap-2">
-        {#each allGameNames as gameName}
+
+      <!-- Quick Filter Search (if more than 6 games) -->
+      {#if allGameNames.length > 6}
+        <div class="relative flex items-center">
+          <svg class="pointer-events-none absolute left-2.5 h-3.5 w-3.5 text-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="11" cy="11" r="8"></circle>
+            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+          </svg>
+          <input
+            type="text"
+            placeholder="Search to filter…"
+            bind:value={filterSearchQuery}
+            class="panel-input w-full rounded-md pl-8 pr-7 py-1 text-xs outline-none"
+          />
+          {#if filterSearchQuery}
+            <button
+              class="absolute right-2 text-muted hover:text-strong cursor-pointer p-0.5"
+              onclick={() => (filterSearchQuery = "")}
+              title="Clear filter search"
+              aria-label="Clear filter search"
+            >
+              <svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="18" y1="6" x2="6" y2="18"></line>
+                <line x1="6" y1="6" x2="18" y2="18"></line>
+              </svg>
+            </button>
+          {/if}
+        </div>
+      {/if}
+
+      <!-- Pills Container -->
+      <div class="filter-pills-scroll flex flex-wrap gap-2 max-h-[50vh] overflow-y-auto pr-1">
+        {#each displayedFilterGames as gameName}
           <button
             class="pill {selectedGames.has(gameName)
               ? 'pill-active'
@@ -2039,8 +2119,12 @@
             <span>{gameName}</span>
           </button>
         {/each}
-        {#if allGameNames.length === 0}
-          <p class="text-xs text-muted">No games found in the recorded data.</p>
+        {#if displayedFilterGames.length === 0}
+          {#if filterSearchQuery.trim()}
+            <p class="py-3 text-center text-xs text-muted w-full">No games matching "{filterSearchQuery}".</p>
+          {:else}
+            <p class="text-xs text-muted">No games found in the recorded data.</p>
+          {/if}
         {/if}
       </div>
     </div>
@@ -3991,6 +4075,26 @@
   .pill-inactive:hover {
     color: var(--exs-text-strong, #ffffff);
     border-color: var(--exs-accent, #818cf8);
+  }
+
+  /* Filter popup */
+  .filter-popup {
+    background: var(--exs-chart-bg, #0f172a);
+    border: 1px solid var(--exs-border, #334155);
+    box-shadow: 0 16px 36px rgba(0, 0, 0, 0.45), 0 4px 12px rgba(0, 0, 0, 0.25);
+  }
+  .filter-pills-scroll::-webkit-scrollbar {
+    width: 6px;
+  }
+  .filter-pills-scroll::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .filter-pills-scroll::-webkit-scrollbar-thumb {
+    background: color-mix(in srgb, var(--exs-border, #475569) 80%, transparent);
+    border-radius: 9999px;
+  }
+  .filter-pills-scroll::-webkit-scrollbar-thumb:hover {
+    background: var(--exs-accent, #818cf8);
   }
 
   /* Scrollable games list */
