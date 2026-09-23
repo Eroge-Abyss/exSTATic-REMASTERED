@@ -302,7 +302,7 @@
 
         {#if isThemeDropdownOpen}
           <div
-            class="absolute right-0 top-full mt-2 w-56 rounded-xl border shadow-2xl z-50 py-1.5 overflow-hidden backdrop-blur-md"
+            class="absolute right-0 top-full mt-2 w-56 rounded-xl border shadow-2xl z-50 py-1.5 max-h-80 overflow-y-auto backdrop-blur-md"
             style="background: var(--exs-block, #0f172a); border-color: var(--exs-border, #334155);"
           >
             {#each themeList as theme}
