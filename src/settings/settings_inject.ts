@@ -24,6 +24,10 @@ const setup = async () => {
     },
   });
 };
-setup();
+
+if (!(window as any).__exstatic_settings_initialized) {
+  (window as any).__exstatic_settings_initialized = true;
+  setup();
+}
 
 export {};
