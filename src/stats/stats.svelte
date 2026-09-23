@@ -1968,8 +1968,20 @@
       <p class="header-text pointer-events-auto">{displayTime}</p>
     </div>
     <div class="flex flex-row items-center gap-2">
-      <button class="toolbar-btn" onclick={toggleFilterPanel}>Filter</button>
-      <button class="toolbar-btn" onclick={toggleGamePanel}>Manage</button>
+      <button
+        class="toolbar-btn"
+        class:toolbar-btn-active={showFilterPanel}
+        onclick={toggleFilterPanel}
+      >
+        Filter
+      </button>
+      <button
+        class="toolbar-btn"
+        class:toolbar-btn-active={showGamePanel}
+        onclick={toggleGamePanel}
+      >
+        Manage
+      </button>
       <button
         class="material-icons header-text header-icon"
         onclick={nextPeriod}>navigate_next</button
@@ -1980,14 +1992,25 @@
   <!-- Game Filter Panel -->
   {#if showFilterPanel}
     <div class="panel">
-      <div class="mb-3 flex items-center justify-between">
-        <h2 class="text-lg font-semibold text-title">Filter Games</h2>
-        <div class="flex gap-2">
+      <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <div class="flex items-center gap-2.5">
+          <h2 class="text-base sm:text-lg font-semibold tracking-tight text-title">Filter Games</h2>
+          <span class="count-badge">
+            {selectedGames.size} of {allGameNames.length} visible
+          </span>
+        </div>
+        <div class="flex items-center gap-2">
           <button class="btn-sm btn-primary" onclick={selectAllGames}>
-            Select All
+            <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="20 6 9 17 4 12"></polyline>
+            </svg>
+            <span>Select All</span>
           </button>
           <button class="btn-sm btn-secondary" onclick={deselectAllGames}>
-            Deselect All
+            <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="4" y="4" width="16" height="16" rx="2"></rect>
+            </svg>
+            <span>Deselect All</span>
           </button>
         </div>
       </div>
@@ -2001,38 +2024,53 @@
           >
             {#if color_overrides[gameName]}
               <span
-                class="inline-block h-2.5 w-2.5 rounded-full"
+                class="inline-block h-2.5 w-2.5 rounded-full ring-1 ring-black/20"
                 style="background-color: {color_overrides[gameName]};"
               ></span>
             {/if}
-            {gameName}
+            <span>{gameName}</span>
           </button>
         {/each}
+        {#if allGameNames.length === 0}
+          <p class="text-xs text-muted">No games found in the recorded data.</p>
+        {/if}
       </div>
     </div>
   {/if}
 
   {#if showGamePanel}
     <div class="panel" id="manage_panel">
-      <div class="mb-3 flex items-center gap-3">
-        <select
-          class="bg-button rounded px-2.5 py-1 text-sm font-medium text-white outline-none cursor-pointer"
-          bind:value={mediaType}
-        >
-          <option value="all">All</option>
-          <option value="vn">VN</option>
-          <option value="mokuro">Mokuro</option>
-          <option value="ttu">TTU</option>
-        </select>
-        <h2 class="text-lg font-semibold text-title">Manage Games</h2>
+      <!-- Header with Segmented Media Filter Navigation -->
+      <div class="mb-5 flex flex-wrap items-center justify-between gap-3 border-b border-dim pb-4">
+        <h2 class="text-base sm:text-lg font-semibold tracking-tight text-title">Manage Games</h2>
+
+        <!-- Segmented Media Filter Selector -->
+        <div class="flex items-center gap-1 rounded-lg bg-block p-1 border border-dim shadow-sm">
+          {#each [
+            { id: 'all', label: 'All' },
+            { id: 'vn', label: 'VN' },
+            { id: 'mokuro', label: 'Mokuro' },
+            { id: 'ttu', label: 'TTU' }
+          ] as tab}
+            <button
+              type="button"
+              class="rounded-md px-3 py-1 text-xs font-semibold uppercase tracking-wider transition-all cursor-pointer {mediaType === tab.id
+                ? 'bg-button text-white shadow-sm'
+                : 'text-text hover:text-white hover:bg-hover/50'}"
+              onclick={() => (mediaType = tab.id)}
+            >
+              {tab.label}
+            </button>
+          {/each}
+        </div>
       </div>
 
       <!-- Add / Edit Stats for any tracked game -->
-      <div class="mb-4">
-        <p class="mb-2 text-xs font-semibold uppercase tracking-widest text-muted">Add / Edit Stats</p>
+      <div class="mb-5">
+        <p class="mb-2 text-xs font-semibold uppercase tracking-widest text-muted">Add / Create Title</p>
 
         <!-- New Title form -->
-        <div class="mb-3 flex flex-wrap items-center gap-2">
+        <div class="flex flex-wrap items-center gap-2">
           <input
             type="text"
             placeholder="New title name…"
@@ -2040,7 +2078,7 @@
             onkeydown={(e) => { if (e.key === "Enter") createTitle(); }}
             class="rename-input min-w-48 flex-1"
           />
-          <select bind:value={newTitleType} class="rounded panel-input px-2 py-1 text-sm">
+          <select bind:value={newTitleType} class="rounded-md panel-input px-2.5 py-1.5 text-xs font-medium cursor-pointer">
             <option value="vn">VN</option>
             <option value="mokuro">Mokuro</option>
             <option value="ttu">TTU</option>
@@ -2050,41 +2088,116 @@
             disabled={creatingTitle || !newTitleName.trim()}
             onclick={createTitle}
           >
-            {creatingTitle ? "Creating…" : "+ Create"}
+            <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="12" y1="5" x2="12" y2="19"></line>
+              <line x1="5" y1="12" x2="19" y2="12"></line>
+            </svg>
+            <span>{creatingTitle ? "Creating…" : "Create"}</span>
           </button>
         </div>
 
         {#if editingGame && !uniqueGames.some((g) => g.uuid === editingGame?.uuid)}
           <div class="mt-3 panel-sub" id="game-editor-{editingGame.uuid}">
-            <h3 class="mb-3 text-sm font-semibold text-title">Edit Stats — {editingGame.name}</h3>
-            <div class="mb-3 flex flex-wrap items-center gap-3 text-sm">
-              <label class="flex items-center gap-1 text-sub">Chars
-                <input type="number" min="0" bind:value={editChars} class="w-24 rounded panel-input px-2 py-1" />
+            <div class="mb-3 flex items-center justify-between border-b border-dim pb-2">
+              <h3 class="text-sm font-semibold text-title">Edit Stats — {editingGame.name}</h3>
+              <span class="type-badge">{editingGame.type}</span>
+            </div>
+
+            <div class="mb-3 flex flex-wrap items-center gap-4 text-sm">
+              <label class="flex items-center gap-2 text-sub font-medium">
+                Chars
+                <input
+                  type="number"
+                  min="0"
+                  bind:value={editChars}
+                  class="w-28 rounded-md panel-input px-2.5 py-1 text-sm"
+                />
               </label>
-              <label class="flex items-center gap-1 text-sub">Time
-                <input type="number" min="0" max="23" bind:value={editHours} class="w-14 rounded panel-input px-2 py-1" />h
-                <input type="number" min="0" max="59" bind:value={editMins} class="w-14 rounded panel-input px-2 py-1" />m
-                <input type="number" min="0" max="59" bind:value={editSecs} class="w-14 rounded panel-input px-2 py-1" />s
+              <label class="flex items-center gap-1.5 text-sub font-medium">
+                Time
+                <input
+                  type="number"
+                  min="0"
+                  max="23"
+                  bind:value={editHours}
+                  class="w-14 rounded-md panel-input px-2 py-1 text-sm text-center"
+                />h
+                <input
+                  type="number"
+                  min="0"
+                  max="59"
+                  bind:value={editMins}
+                  class="w-14 rounded-md panel-input px-2 py-1 text-sm text-center"
+                />m
+                <input
+                  type="number"
+                  min="0"
+                  max="59"
+                  bind:value={editSecs}
+                  class="w-14 rounded-md panel-input px-2 py-1 text-sm text-center"
+                />s
               </label>
             </div>
-            <p class="mb-1 text-xs text-muted">👆 Click or drag dates on the heatmap above to select them.</p>
+
+            <div class="mb-3 flex items-center gap-1.5 text-xs text-muted">
+              <svg class="h-3.5 w-3.5 text-accent shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
+                <line x1="16" y1="2" x2="16" y2="6"></line>
+                <line x1="8" y1="2" x2="8" y2="6"></line>
+                <line x1="3" y1="10" x2="21" y2="10"></line>
+              </svg>
+              <span>Click or drag dates on the calendar heatmap above to select them.</span>
+            </div>
+
             {#if recalcMsg}
-              <p class="mb-1 text-xs text-emerald-400">✓ {recalcMsg}</p>
+              <div class="mb-3 flex items-center gap-1.5 text-xs text-emerald-400">
+                <svg class="h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                  <polyline points="20 6 9 17 4 12"></polyline>
+                </svg>
+                <span>{recalcMsg}</span>
+              </div>
             {/if}
-            <div class="flex flex-wrap items-center justify-between gap-2">
-              <div class="flex gap-2">
-                <button class="btn-sm btn-primary" disabled={editSaving || editSelectedDates.size === 0} onclick={applyStats}>
-                  {editSaving ? 'Saving…' : 'Apply to ' + editSelectedDates.size + ' date' + (editSelectedDates.size !== 1 ? 's' : '')}
+
+            <div class="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-dim">
+              <div class="flex flex-wrap gap-2">
+                <button
+                  class="btn-sm btn-primary"
+                  disabled={editSaving || editSelectedDates.size === 0}
+                  onclick={applyStats}
+                >
+                  <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                    <polyline points="20 6 9 17 4 12"></polyline>
+                  </svg>
+                  <span>{editSaving ? "Saving…" : `Apply to ${editSelectedDates.size} date${editSelectedDates.size !== 1 ? "s" : ""}`}</span>
                 </button>
-                <button class="btn-sm btn-secondary" onclick={() => (editSelectedDates = new Set())}>Clear</button>
-                <button class="btn-sm btn-secondary" disabled={editHistory.length === 0} onclick={undoLastApply}>↩ Undo ({editHistory.length})</button>
+                <button
+                  class="btn-sm btn-secondary"
+                  onclick={() => (editSelectedDates = new Set())}
+                >
+                  Clear
+                </button>
+                <button
+                  class="btn-sm btn-secondary"
+                  disabled={editHistory.length === 0}
+                  onclick={undoLastApply}
+                >
+                  <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                    <polyline points="1 4 1 10 7 10"></polyline>
+                    <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path>
+                  </svg>
+                  <span>Undo ({editHistory.length})</span>
+                </button>
                 <button
                   class="btn-sm btn-secondary"
                   disabled={recalculating || editSelectedDates.size !== 1}
                   onclick={recalculateFromLines}
                   title="Recount chars and lines from the lines stored for this date"
                 >
-                  {recalculating ? "Scanning…" : "↺ Recalculate"}
+                  <svg class="h-3.5 w-3.5 {recalculating ? 'animate-spin' : ''}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path>
+                    <path d="M3 3v5h5"></path>
+                  </svg>
+                  <span>{recalculating ? "Scanning…" : "Recalculate"}</span>
                 </button>
               </div>
               <button class="btn-sm btn-primary" onclick={finishEdit}>Done</button>
@@ -2094,13 +2207,13 @@
       </div>
 
       <!-- Active Games -->
-      <div class="space-y-1">
+      <div class="space-y-1.5">
         {#each uniqueGames as game}
           <div class="game-row">
-            <div class="flex min-w-0 flex-1 items-center gap-2">
+            <div class="flex min-w-0 flex-1 items-center gap-2.5">
               {#if color_overrides[game.name]}
                 <span
-                  class="inline-block h-3 w-3 shrink-0 rounded-full"
+                  class="inline-block h-3 w-3 shrink-0 rounded-full ring-1 ring-black/20"
                   style="background-color: {color_overrides[game.name]};"
                 ></span>
               {/if}
@@ -2118,38 +2231,55 @@
                 <button
                   class="btn-sm btn-primary"
                   onclick={() => submitRename(game.uuid)}
+                  title="Save name"
                 >
-                  Save
+                  <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                    <polyline points="20 6 9 17 4 12"></polyline>
+                  </svg>
+                  <span>Save</span>
                 </button>
-                <button class="btn-sm btn-secondary" onclick={cancelRename}>
-                  Cancel
+                <button class="btn-sm btn-secondary" onclick={cancelRename} title="Cancel">
+                  <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                    <line x1="18" y1="6" x2="6" y2="18"></line>
+                    <line x1="6" y1="6" x2="18" y2="18"></line>
+                  </svg>
+                  <span>Cancel</span>
                 </button>
               {:else}
-                <span class="truncate text-sm text-strong">{game.name}</span>
+                <span class="truncate text-sm font-medium text-strong">{game.name}</span>
                 <span class="type-badge">{game.type}</span>
               {/if}
             </div>
 
             {#if renamingUuid !== game.uuid}
-              <div class="flex shrink-0 gap-1">
+              <div class="flex shrink-0 items-center gap-1">
                 <button
-                  class="btn-sm btn-secondary"
+                  class="btn-action"
                   title="Rename"
+                  aria-label="Rename {game.name}"
                   onclick={() => startRename(game.uuid, game.name)}
                 >
-                  ✏️
+                  <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M12 20h9"></path>
+                    <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>
+                  </svg>
                 </button>
 
                 <button
-                  class="btn-sm btn-primary"
+                  class="btn-action btn-action-primary"
                   title="Edit Stats"
+                  aria-label="Edit stats for {game.name}"
                   onclick={() => startEditStats(game)}
                 >
-                  📊
+                  <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <line x1="18" y1="20" x2="18" y2="10"></line>
+                    <line x1="12" y1="20" x2="12" y2="4"></line>
+                    <line x1="6" y1="20" x2="6" y2="14"></line>
+                  </svg>
                 </button>
 
                 {#if confirmDeleteUuid === game.uuid}
-                  <span class="mr-1 self-center text-xs text-red-400"
+                  <span class="mr-1 self-center text-xs font-semibold text-rose-400"
                     >Delete?</span
                   >
                   <button
@@ -2166,11 +2296,15 @@
                   </button>
                 {:else}
                   <button
-                    class="btn-sm btn-danger-muted"
+                    class="btn-action btn-danger-muted"
                     title="Delete"
+                    aria-label="Delete {game.name}"
                     onclick={() => (confirmDeleteUuid = game.uuid)}
                   >
-                    🗑️
+                    <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <polyline points="3 6 5 6 21 6"></polyline>
+                      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                    </svg>
                   </button>
                 {/if}
               </div>
@@ -2180,60 +2314,79 @@
           <!-- Edit Stats sub-panel -->
           {#if editingGame?.uuid === game.uuid}
             <div class="mt-3 panel-sub" id="game-editor-{game.uuid}">
-              <h3 class="mb-3 text-sm font-semibold text-title">Edit Stats — {game.name}</h3>
+              <div class="mb-3 flex items-center justify-between border-b border-dim pb-2">
+                <h3 class="text-sm font-semibold text-title">Edit Stats — {game.name}</h3>
+                <span class="type-badge">{game.type}</span>
+              </div>
 
               <!-- Inputs -->
-              <div class="mb-3 flex flex-wrap items-center gap-3 text-sm">
-                <label class="flex items-center gap-1 text-sub">
+              <div class="mb-3 flex flex-wrap items-center gap-4 text-sm">
+                <label class="flex items-center gap-2 text-sub font-medium">
                   Chars
                   <input
                     type="number"
                     min="0"
                     bind:value={editChars}
-                    class="w-24 rounded panel-input px-2 py-1"
+                    class="w-28 rounded-md panel-input px-2.5 py-1 text-sm"
                   />
                 </label>
-                <label class="flex items-center gap-1 text-sub">
+                <label class="flex items-center gap-1.5 text-sub font-medium">
                   Time
                   <input
                     type="number"
                     min="0"
                     max="23"
                     bind:value={editHours}
-                    class="w-14 rounded panel-input px-2 py-1"
+                    class="w-14 rounded-md panel-input px-2 py-1 text-sm text-center"
                   />h
                   <input
                     type="number"
                     min="0"
                     max="59"
                     bind:value={editMins}
-                    class="w-14 rounded panel-input px-2 py-1"
+                    class="w-14 rounded-md panel-input px-2 py-1 text-sm text-center"
                   />m
                   <input
                     type="number"
                     min="0"
                     max="59"
                     bind:value={editSecs}
-                    class="w-14 rounded panel-input px-2 py-1"
+                    class="w-14 rounded-md panel-input px-2 py-1 text-sm text-center"
                   />s
                 </label>
               </div>
 
-              <p class="mb-1 text-xs text-muted">👆 Click or drag dates on the heatmap above to select them.</p>
+              <div class="mb-3 flex items-center gap-1.5 text-xs text-muted">
+                <svg class="h-3.5 w-3.5 text-accent shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
+                  <line x1="16" y1="2" x2="16" y2="6"></line>
+                  <line x1="8" y1="2" x2="8" y2="6"></line>
+                  <line x1="3" y1="10" x2="21" y2="10"></line>
+                </svg>
+                <span>Click or drag dates on the calendar heatmap above to select them.</span>
+              </div>
 
               {#if recalcMsg}
-                <p class="mb-1 text-xs text-emerald-400">✓ {recalcMsg}</p>
+                <div class="mb-3 flex items-center gap-1.5 text-xs text-emerald-400">
+                  <svg class="h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                    <polyline points="20 6 9 17 4 12"></polyline>
+                  </svg>
+                  <span>{recalcMsg}</span>
+                </div>
               {/if}
 
               <!-- Action row -->
-              <div class="flex flex-wrap items-center justify-between gap-2">
-                <div class="flex gap-2">
+              <div class="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-dim">
+                <div class="flex flex-wrap gap-2">
                   <button
                     class="btn-sm btn-primary"
                     disabled={editSaving || editSelectedDates.size === 0}
                     onclick={applyStats}
                   >
-                    {editSaving ? "Saving…" : `Apply to ${editSelectedDates.size} date${editSelectedDates.size !== 1 ? "s" : ""}`}
+                    <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                      <polyline points="20 6 9 17 4 12"></polyline>
+                    </svg>
+                    <span>{editSaving ? "Saving…" : `Apply to ${editSelectedDates.size} date${editSelectedDates.size !== 1 ? "s" : ""}`}</span>
                   </button>
                   <button
                     class="btn-sm btn-secondary"
@@ -2246,7 +2399,11 @@
                     disabled={editHistory.length === 0}
                     onclick={undoLastApply}
                   >
-                    ↩ Undo ({editHistory.length})
+                    <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                      <polyline points="1 4 1 10 7 10"></polyline>
+                      <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path>
+                    </svg>
+                    <span>Undo ({editHistory.length})</span>
                   </button>
                   <button
                     class="btn-sm btn-secondary"
@@ -2254,7 +2411,11 @@
                     onclick={recalculateFromLines}
                     title="Recount chars and lines from the lines stored for this date"
                   >
-                    {recalculating ? "Scanning…" : "↺ Recalculate"}
+                    <svg class="h-3.5 w-3.5 {recalculating ? 'animate-spin' : ''}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path>
+                      <path d="M3 3v5h5"></path>
+                    </svg>
+                    <span>{recalculating ? "Scanning…" : "Recalculate"}</span>
                   </button>
                 </div>
                 <button class="btn-sm btn-primary" onclick={finishEdit}>Done</button>
@@ -2269,103 +2430,129 @@
 
       <!-- Deleted Games -->
       {#if deletedGames.length > 0}
-        <button
-          class="mt-4 text-sm text-muted hover:text-strong"
-          onclick={() => (showDeletedGames = !showDeletedGames)}
-        >
-          {showDeletedGames ? "▾" : "▸"} Deleted Games ({deletedGames.length})
-        </button>
+        <div class="mt-5 border-t border-dim pt-4">
+          <button
+            class="flex items-center gap-2 text-sm font-semibold text-muted hover:text-strong transition-colors cursor-pointer"
+            onclick={() => (showDeletedGames = !showDeletedGames)}
+          >
+            <svg class="h-3.5 w-3.5 transition-transform duration-200 {showDeletedGames ? 'rotate-90 text-accent' : ''}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="9 18 15 12 9 6"></polyline>
+            </svg>
+            <span>Deleted Games</span>
+            <span class="count-badge">{deletedGames.length}</span>
+          </button>
 
-        {#if showDeletedGames}
-          <div class="mt-2 space-y-1">
-            {#each deletedGames as game}
-              <div class="game-row game-row-deleted">
-                <div class="flex min-w-0 flex-1 items-center gap-2">
-                  <span class="truncate text-sm text-muted line-through"
-                    >{game.name}</span
-                  >
-                  <span class="type-badge">{game.type}</span>
-                  <span class="text-[10px] text-muted">
-                    {new Date(game.deleted_at).toLocaleDateString()}
-                  </span>
+          {#if showDeletedGames}
+            <div class="mt-3 space-y-1.5">
+              {#each deletedGames as game}
+                <div class="game-row game-row-deleted">
+                  <div class="flex min-w-0 flex-1 items-center gap-2">
+                    <span class="truncate text-sm text-muted line-through"
+                      >{game.name}</span
+                    >
+                    <span class="type-badge">{game.type}</span>
+                    <span class="text-[10px] text-muted">
+                      {new Date(game.deleted_at).toLocaleDateString()}
+                    </span>
+                  </div>
+                  <div class="flex shrink-0 items-center gap-1.5">
+                    <button
+                      class="btn-sm btn-restore"
+                      onclick={() => handleRestore(game.uuid)}
+                    >
+                      <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                        <polyline points="1 4 1 10 7 10"></polyline>
+                        <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path>
+                      </svg>
+                      <span>Restore</span>
+                    </button>
+                    {#if confirmPermanentDeleteUuid === game.uuid}
+                      <button
+                        class="btn-sm btn-danger"
+                        onclick={() => handlePermanentDelete(game.uuid)}
+                      >
+                        Confirm
+                      </button>
+                      <button
+                        class="btn-sm btn-secondary"
+                        onclick={() => (confirmPermanentDeleteUuid = null)}
+                      >
+                        Cancel
+                      </button>
+                    {:else}
+                      <button
+                        class="btn-action btn-danger-muted"
+                        title="Permanently delete"
+                        aria-label="Permanently delete {game.name}"
+                        onclick={() => (confirmPermanentDeleteUuid = game.uuid)}
+                      >
+                        <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                          <line x1="18" y1="6" x2="6" y2="18"></line>
+                          <line x1="6" y1="6" x2="18" y2="18"></line>
+                        </svg>
+                      </button>
+                    {/if}
+                  </div>
                 </div>
-                <div class="flex shrink-0 gap-1">
-                  <button
-                    class="btn-sm btn-restore"
-                    onclick={() => handleRestore(game.uuid)}
-                  >
-                    ↩️ Restore
-                  </button>
-                  {#if confirmPermanentDeleteUuid === game.uuid}
-                    <button
-                      class="btn-sm btn-danger"
-                      onclick={() => handlePermanentDelete(game.uuid)}
-                    >
-                      Confirm
-                    </button>
-                    <button
-                      class="btn-sm btn-secondary"
-                      onclick={() => (confirmPermanentDeleteUuid = null)}
-                    >
-                      Cancel
-                    </button>
-                  {:else}
-                    <button
-                      class="btn-sm btn-danger-muted"
-                      title="Permanently delete"
-                      onclick={() => (confirmPermanentDeleteUuid = game.uuid)}
-                    >
-                      ❌
-                    </button>
-                  {/if}
-                </div>
-              </div>
-            {/each}
-          </div>
-        {/if}
+              {/each}
+            </div>
+          {/if}
+        </div>
       {/if}
 
       <!-- Merge Duplicates -->
       {#if duplicateGroups.length > 0}
-        <button
-          class="mt-4 text-sm text-yellow-400 hover:text-yellow-200"
-          onclick={() => (showDuplicates = !showDuplicates)}
-        >
-          {showDuplicates ? "▾" : "▸"} Duplicate Titles ({duplicateGroups.length})
-        </button>
+        <div class="mt-4 border-t border-dim pt-4">
+          <button
+            class="flex items-center gap-2 text-sm font-semibold text-amber-400/90 hover:text-amber-300 transition-colors cursor-pointer"
+            onclick={() => (showDuplicates = !showDuplicates)}
+          >
+            <svg class="h-3.5 w-3.5 transition-transform duration-200 {showDuplicates ? 'rotate-90 text-amber-400' : ''}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="9 18 15 12 9 6"></polyline>
+            </svg>
+            <span>Duplicate Titles</span>
+            <span class="count-badge-amber">{duplicateGroups.length}</span>
+          </button>
 
-        {#if showDuplicates}
-          <div class="mt-2 space-y-1">
-            {#each duplicateGroups as group}
-              <div class="game-row items-center">
-                <div class="flex min-w-0 flex-1 items-center gap-2">
-                  <span class="truncate text-sm text-yellow-300">{group.name}</span>
-                  <span class="type-badge">{group.uuids.length} entries</span>
+          {#if showDuplicates}
+            <div class="mt-3 space-y-1.5">
+              {#each duplicateGroups as group}
+                <div class="game-row items-center">
+                  <div class="flex min-w-0 flex-1 items-center gap-2">
+                    <span class="truncate text-sm font-medium text-amber-300">{group.name}</span>
+                    <span class="type-badge">{group.uuids.length} entries</span>
+                  </div>
+                  <button
+                    class="btn-sm btn-primary shrink-0"
+                    disabled={mergingGroup === group.name}
+                    onclick={() => handleMerge(group)}
+                  >
+                    <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                      <circle cx="18" cy="18" r="3"></circle>
+                      <circle cx="6" cy="6" r="3"></circle>
+                      <path d="M6 21V9a9 9 0 0 0 9 9"></path>
+                    </svg>
+                    <span>{mergingGroup === group.name ? "Merging…" : "Merge"}</span>
+                  </button>
                 </div>
-                <button
-                  class="btn-sm btn-primary shrink-0"
-                  disabled={mergingGroup === group.name}
-                  onclick={() => handleMerge(group)}
-                >
-                  {mergingGroup === group.name ? "Merging…" : "⊕ Merge"}
-                </button>
-              </div>
-            {/each}
-          </div>
-        {/if}
+              {/each}
+            </div>
+          {/if}
+        </div>
       {/if}
 
       <!-- Merge History -->
       {#if mergeHistory.length > 0}
         <div class="mt-4 border-t border-dim pt-4">
           <p class="mb-2 text-xs font-semibold uppercase tracking-widest text-muted">Merge History</p>
-          <div class="space-y-1">
+          <div class="space-y-1.5">
             {#each mergeHistory as snap}
               <div class="game-row items-center">
                 <div class="flex min-w-0 flex-1 flex-col gap-0.5">
                   <span class="truncate text-sm text-strong">
                     <span class="text-accent">{snap.secondaryName}</span>
-                    → <span class="text-accent">{snap.primaryName}</span>
+                    <span class="text-muted mx-1">→</span>
+                    <span class="text-accent">{snap.primaryName}</span>
                   </span>
                   <span class="text-[10px] text-muted">
                     {new Date(snap.timestamp).toLocaleString()}
@@ -2376,7 +2563,11 @@
                   disabled={undoingMerge === snap.timestamp}
                   onclick={() => handleUndoMerge(snap)}
                 >
-                  {undoingMerge === snap.timestamp ? "Restoring…" : "↩ Undo"}
+                  <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                    <polyline points="1 4 1 10 7 10"></polyline>
+                    <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path>
+                  </svg>
+                  <span>{undoingMerge === snap.timestamp ? "Restoring…" : "Undo"}</span>
                 </button>
               </div>
             {/each}
@@ -3617,106 +3808,177 @@
 
   /* Panels */
   .panel {
-    @apply rounded-lg p-4;
-    background: var(--exs-block, #0f172a);
+    @apply rounded-xl p-5;
+    background: var(--exs-chart-bg, #0f172a);
     border: 1px solid var(--exs-border, #334155);
+    box-shadow: var(--exs-section-shadow, 0 4px 16px rgba(0, 0, 0, 0.15));
   }
   .panel-sub {
-    border-radius: 8px;
+    border-radius: 10px;
     border: 1px solid var(--exs-border, #334155);
     background: var(--exs-surface, #1e293b);
-    padding: 1rem;
+    padding: 1.125rem;
   }
   .panel-input {
     background: var(--exs-menu-bg, #334155);
     color: var(--exs-text-strong, #ffffff);
-    border: 1px solid var(--exs-border, transparent);
+    border: 1px solid var(--exs-border, #475569);
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
   }
   .panel-input:focus {
     border-color: var(--exs-accent, #818cf8);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--exs-accent, #818cf8) 35%, transparent);
     outline: none;
   }
 
   /* Small buttons */
   .btn-sm {
-    @apply cursor-pointer rounded px-2 py-1 text-xs;
+    @apply cursor-pointer rounded-md px-2.5 py-1 text-xs font-medium inline-flex items-center justify-center gap-1.5;
+    transition: all 0.15s ease;
+  }
+  .btn-action {
+    @apply cursor-pointer rounded-md p-1.5 text-xs inline-flex items-center justify-center;
+    background: var(--exs-menu-bg, #334155);
+    color: var(--exs-menu-text, #d1d5db);
+    border: 1px solid var(--exs-border, transparent);
+    transition: all 0.15s ease;
+  }
+  .btn-action:hover {
+    background: var(--exs-accent, #818cf8);
+    color: #ffffff;
+    border-color: var(--exs-accent, #818cf8);
+  }
+  .btn-action-primary {
+    background: var(--exs-btn-primary-bg, #4f46e5);
+    color: var(--exs-btn-primary-text, #ffffff);
+  }
+  .btn-action-primary:hover {
+    background: var(--exs-accent-hover, #4338ca);
   }
   .btn-primary {
     background: var(--exs-btn-primary-bg, #4f46e5);
     color: var(--exs-btn-primary-text, #ffffff);
+    border: 1px solid transparent;
   }
-  .btn-primary:hover {
+  .btn-primary:hover:not(:disabled) {
     background: var(--exs-accent-hover, #4338ca);
+  }
+  .btn-primary:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
   }
   .btn-secondary {
     background: var(--exs-menu-bg, #334155);
     color: var(--exs-menu-text, #d1d5db);
     border: 1px solid var(--exs-border, transparent);
   }
-  .btn-secondary:hover {
-    background: var(--exs-border, #475569);
+  .btn-secondary:hover:not(:disabled) {
+    background: var(--exs-surface, #1e293b);
+    color: var(--exs-text-strong, #ffffff);
+    border-color: var(--exs-accent, #818cf8);
+  }
+  .btn-secondary:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
   }
   .btn-danger {
-    @apply bg-red-600 text-white;
+    @apply bg-rose-600 text-white;
+    border: 1px solid transparent;
   }
   .btn-danger:hover {
-    @apply bg-red-500;
+    @apply bg-rose-500;
   }
   .btn-danger-muted {
-    background: rgba(239, 68, 68, 0.2);
-    color: #fca5a5;
+    background: color-mix(in srgb, #f43f5e 15%, transparent);
+    color: #f43f5e;
+    border: 1px solid color-mix(in srgb, #f43f5e 25%, transparent);
   }
   .btn-danger-muted:hover {
-    background: rgba(239, 68, 68, 0.35);
+    background: color-mix(in srgb, #f43f5e 25%, transparent);
+    color: #fb7185;
   }
   .btn-restore {
-    background: rgba(34, 197, 94, 0.2);
-    color: #86efac;
+    background: color-mix(in srgb, #10b981 15%, transparent);
+    color: #34d399;
+    border: 1px solid color-mix(in srgb, #10b981 25%, transparent);
   }
-  .btn-restore:hover {
-    background: rgba(34, 197, 94, 0.35);
+  .btn-restore:hover:not(:disabled) {
+    background: color-mix(in srgb, #10b981 25%, transparent);
+    color: #6ee7b7;
+  }
+  .btn-restore:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
   }
 
   /* Pills for filter */
   .pill {
-    @apply flex cursor-pointer items-center gap-1.5 rounded-full px-3 py-1 text-sm;
+    @apply flex cursor-pointer items-center gap-1.5 rounded-full px-3 py-1 text-xs sm:text-sm font-medium;
     transition: all 0.15s ease;
   }
   .pill-active {
     background: var(--exs-accent, #818cf8);
     color: var(--exs-accent-text, #ffffff);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
   }
   .pill-inactive {
-    background: var(--exs-menu-bg, #334155);
+    background: var(--exs-surface, #1e293b);
     color: var(--exs-text-muted, #94a3b8);
     border: 1px solid var(--exs-border, transparent);
+  }
+  .pill-inactive:hover {
+    color: var(--exs-text-strong, #ffffff);
+    border-color: var(--exs-accent, #818cf8);
   }
 
   /* Game rows */
   .game-row {
-    @apply flex items-center justify-between rounded px-3 py-2;
+    @apply flex items-center justify-between rounded-lg px-3 py-2;
     background: var(--exs-surface, #1e293b);
-    border: 1px solid var(--exs-border, transparent);
+    border: 1px solid var(--exs-border, #334155);
+    transition: border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
+  }
+  .game-row:hover {
+    border-color: color-mix(in srgb, var(--exs-accent, #818cf8) 50%, var(--exs-border, #334155));
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
   }
   .game-row-deleted {
-    border: 1px solid var(--exs-border, #334155);
-    opacity: 0.6;
+    border: 1px dashed var(--exs-border, #334155);
+    opacity: 0.7;
   }
 
   /* Type badge */
   .type-badge {
-    @apply rounded px-1.5 py-0.5 uppercase;
+    @apply rounded-md px-1.5 py-0.5 uppercase font-medium;
     font-size: 10px;
+    letter-spacing: 0.05em;
     background: var(--exs-menu-bg, #334155);
     color: var(--exs-text-muted, #9ca3af);
+    border: 1px solid var(--exs-border, transparent);
   }
 
   /* Rename input */
   .rename-input {
-    @apply flex-1 rounded px-2 py-1 text-sm outline-none;
+    @apply flex-1 rounded-md px-2.5 py-1 text-sm outline-none;
     background: var(--exs-menu-bg, #334155);
     color: var(--exs-text-strong, #ffffff);
-    border: 1px solid var(--exs-accent, #818cf8);
+    border: 1px solid var(--exs-border, #475569);
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  }
+  .rename-input:focus {
+    border-color: var(--exs-accent, #818cf8);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--exs-accent, #818cf8) 35%, transparent);
+  }
+
+  .count-badge {
+    @apply rounded-full px-2 py-0.5 text-xs font-semibold;
+    background: var(--exs-menu-bg, #334155);
+    color: var(--exs-text-muted, #94a3b8);
+  }
+  .count-badge-amber {
+    @apply rounded-full px-2 py-0.5 text-xs font-semibold;
+    background: color-mix(in srgb, #f59e0b 20%, transparent);
+    color: #fbbf24;
   }
 
   /* Activity & Streak Section */
