@@ -454,9 +454,8 @@
     font-weight: 700;
     font-family: system-ui, sans-serif;
     line-height: 1;
-    opacity: 0.95;
+    opacity: 0.85;
     pointer-events: none;
     user-select: none;
-    text-shadow: 0 0 2px rgba(0, 0, 0, 0.8);
   }
 </style>
