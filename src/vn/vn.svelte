@@ -28,8 +28,6 @@
   let restoreClickCount = 0;
 
   onMount(async () => {
-    document.documentElement.style.setProperty("--default-menu-blur", "0");
-
     const raw = await browser.storage.local.get([
       "show_texthooker_ws",
       "show_tadoku_ws",
@@ -152,20 +150,12 @@
       "--default-inactivity-blur",
       "0",
     );
-    document.documentElement.style.setProperty(
-      "--default-menu-blur",
-      (vn_storage.properties["menu_blur"] ?? 8) + "px",
-    );
   });
 
   document.addEventListener("status_inactive", () => {
     document.documentElement.style.setProperty(
       "--default-inactivity-blur",
-      (vn_storage.properties["inactivity_blur"] ?? 2) + "px",
-    );
-    document.documentElement.style.setProperty(
-      "--default-menu-blur",
-      "0",
+      vn_storage.properties["inactivity_blur"] + "px",
     );
   });
 
@@ -397,9 +387,6 @@
     color: #000000;
     background: color-mix(in srgb, var(--exs-accent) 70%, transparent);
     filter: blur(var(--default-menu-blur));
-  }
-  .menu-bar:hover {
-    background: color-mix(in srgb, var(--exs-accent) 85%, transparent);
   }
   .menu-bar.collapsed {
     gap: 0 !important;
