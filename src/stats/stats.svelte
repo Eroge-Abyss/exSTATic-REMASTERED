@@ -2578,7 +2578,7 @@
             <!-- svelte-ignore a11y_click_events_have_key_events -->
             <!-- svelte-ignore a11y_no_static_element_interactions -->
             <span
-              class="selected-game-title absolute bottom-4 right-4 max-w-[65%] truncate text-right font-mono text-[10px] tracking-wide cursor-pointer"
+              class="selected-game-title absolute bottom-2 right-4 max-w-[65%] truncate text-right font-mono text-xs tracking-wide cursor-pointer"
               title="{legendSelectedGroup} (click to clear)"
               onclick={(e) => {
                 e.stopPropagation();
@@ -2589,7 +2589,7 @@
             </span>
           {:else}
             <span
-              class="absolute bottom-4 right-4 text-right font-mono text-[10px] uppercase tracking-wide text-black/40"
+              class="absolute bottom-2 right-4 text-right font-mono text-[10px] uppercase tracking-wide text-black/40"
             >
               {Math.round($twTotalTitles)} titles
             </span>
