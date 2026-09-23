@@ -448,14 +448,15 @@
 
   .ws-badge {
     position: absolute;
-    top: -2px;
+    bottom: -2px;
     right: -4px;
     font-size: 0.7rem;
     font-weight: 700;
     font-family: system-ui, sans-serif;
     line-height: 1;
-    opacity: 0.85;
+    opacity: 0.95;
     pointer-events: none;
     user-select: none;
+    text-shadow: 0 0 2px rgba(0, 0, 0, 0.8);
   }
 </style>
