@@ -10,7 +10,7 @@
   import { applyTheme, setTheme } from "../themes/apply_theme";
   import { themeList, type ThemeId } from "../themes/themes";
   import { exportLines, exportStats } from "../data_wrangling/data_export";
-  import { importLines, importStats } from "../data_wrangling/data_import";
+  import { importLines, importStats, revertLastImport } from "../data_wrangling/data_import";
   import type { DataEntry } from "../data_wrangling/data_extraction";
   import { parse } from "papaparse";
 
@@ -175,7 +175,9 @@
       checkTadokuStatus();
       checkTadokuContestInfo();
     }
+    await checkRevertImportStatus();
     const handleFocus = () => {
+      checkRevertImportStatus();
       if (tadokuLogging) {
         checkTadokuStatus();
         checkTadokuContestInfo();
@@ -223,6 +225,22 @@
 
   let statsFileInput: HTMLInputElement | undefined = $state();
   let linesFileInput: HTMLInputElement | undefined = $state();
+  let canRevertImport = $state(false);
+  let lastImportInfo = $state<string | null>(null);
+
+  const checkRevertImportStatus = async () => {
+    const data = await browser.storage.local.get("last_import_backup");
+    if (data.last_import_backup && data.last_import_backup.timestamp) {
+      canRevertImport = true;
+      const date = new Date(data.last_import_backup.timestamp);
+      const dateStr = date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+      const timeStr = date.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+      lastImportInfo = `${data.last_import_backup.type === 'stats' ? 'Stats' : 'Lines'} (${dateStr} ${timeStr})`;
+    } else {
+      canRevertImport = false;
+      lastImportInfo = null;
+    }
+  };
 
   const requestExportLines = async () => {
     const confirmed = confirm(
@@ -252,6 +270,7 @@
       dynamicTyping: true,
       complete: async (result) => {
         await importStats(result.data as DataEntry[]);
+        await checkRevertImportStatus();
         alert(
           "Finished importing stats successfully!\nPlease refresh all exSTATic pages now...",
         );
@@ -278,12 +297,33 @@
       dynamicTyping: true,
       complete: async (result) => {
         await importLines(result.data as { [key: string]: string | number }[]);
+        await checkRevertImportStatus();
         alert(
           "Finished importing lines successfully!\nPlease refresh all exSTATic pages now...",
         );
         (event.target as HTMLInputElement).value = "";
       },
     });
+  };
+
+  const requestRevertImport = async () => {
+    if (!canRevertImport) {
+      alert("No previous import found to revert.");
+      return;
+    }
+
+    const confirmed = confirm(
+      `Are you sure you want to revert the last import (${lastImportInfo || ''})?\nThis will restore the previous stats and line records to how they were immediately prior to that import.`,
+    );
+    if (!confirmed) return;
+
+    const res = await revertLastImport();
+    await checkRevertImportStatus();
+    if (res.success) {
+      alert(`${res.message}\nPlease refresh all exSTATic pages now.`);
+    } else {
+      alert(res.message);
+    }
   };
 
   interface Props {
@@ -490,7 +530,7 @@
         <SettingRow
           label="Import Data"
           description="Restore reading records from CSV backups (replaces conflicting days)"
-          inputClass="gap-2.5"
+          inputClass="gap-2.5 flex-wrap"
         >
           <button
             type="button"
@@ -527,6 +567,21 @@
             accept=".csv"
             onchange={requestImportLines}
           />
+
+          <button
+            type="button"
+            class="inline-flex items-center gap-2 rounded-lg bg-surface px-3.5 py-1.5 text-xs font-semibold transition-all border border-dim shadow-sm cursor-pointer {canRevertImport
+              ? 'text-amber-400 hover:bg-hover hover:text-white'
+              : 'text-muted opacity-40 cursor-not-allowed'}"
+            onclick={requestRevertImport}
+            disabled={!canRevertImport}
+            title={canRevertImport ? `Revert import (${lastImportInfo})` : 'No previous import to revert'}
+          >
+            <svg class="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h10a5 5 0 0 1 5 5v2m0 0l-3-3m3 3l3-3M3 10l3-3m-3 3l3 3" />
+            </svg>
+            <span>{canRevertImport && lastImportInfo ? `Revert last import (${lastImportInfo})` : 'Revert last import'}</span>
+          </button>
         </SettingRow>
       </section>
     {:else if type === "vn"}

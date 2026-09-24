@@ -96,10 +96,10 @@ export class VNStorage extends MediaStorage {
     }
   }
 
-  async deleteLines(details: [[number, string, string]]) {
+  async deleteLines(details: [number, string, string, number?][]) {
     let date_stats: { [date: string]: Partial<Stat> } = {};
 
-    details.forEach(([, line, date]: [number, string, string]) => {
+    details.forEach(([, line, date]) => {
       if (date === undefined) {
         date = dateNowString();
       }
@@ -116,13 +116,51 @@ export class VNStorage extends MediaStorage {
         (date_stat?.chars_read ?? 0) + charsInLine(line);
     });
 
+    // Save deletion snapshot into storage before deleting
+    const backup = {
+      uuid: this.uuid,
+      game_name: this.details?.name || "Game",
+      timestamp: Date.now(),
+      lines: details.map(([line_id, line, date, time]) => ({
+        id: line_id,
+        line,
+        date: date || dateNowString(),
+        time: time || timeNowSeconds(),
+      })),
+      date_stats,
+    };
+    await browser.storage.local.set({ last_deletion_backup: backup });
+
     await this.instance_storage?.deleteLines(
       details.map(([line_id, ,]) => line_id),
     );
     await this.instance_storage?.subStats(date_stats);
   }
 
-  async deleteLine(line_id: number, line: string, date: string) {
+  async deleteLine(line_id: number, line: string, date: string, time?: number) {
+    const date_stats: { [date: string]: Partial<Stat> } = {
+      [date]: {
+        lines_read: lineSplitCount(line),
+        chars_read: charsInLine(line),
+      },
+    };
+
+    const backup = {
+      uuid: this.uuid,
+      game_name: this.details?.name || "Game",
+      timestamp: Date.now(),
+      lines: [
+        {
+          id: line_id,
+          line,
+          date,
+          time: time || timeNowSeconds(),
+        },
+      ],
+      date_stats,
+    };
+    await browser.storage.local.set({ last_deletion_backup: backup });
+
     await this.instance_storage?.deleteLine(line_id);
     await this.instance_storage?.subDailyStats(date, {
       lines_read: lineSplitCount(line),

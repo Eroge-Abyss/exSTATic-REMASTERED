@@ -1,12 +1,14 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import * as browser from "webextension-polyfill";
-  import { timeToDateString } from "../calculations";
+  import { timeNowSeconds, timeToDateString } from "../calculations";
   import type { VNStorage } from "./vn_storage";
+  import { InstanceStorage } from "../storage/instance_storage";
   import StatBar from "../components/interface/stat_bar.svelte";
   import MenuBar from "../components/interface/menu_bar.svelte";
   import MenuOption from "../components/interface/menu_option.svelte";
   import LineHolder from "../components/interface/line_holder.svelte";
+  import ContextMenu from "../components/interface/context_menu.svelte";
   import { applyTheme } from "../themes/apply_theme";
 
   applyTheme();
@@ -179,12 +181,91 @@
     const parents = checked_boxes.map((checkbox) => checkbox.parentElement);
     const details = parents.map((element_div) => [
       Number.parseInt(element_div?.dataset.lineId!),
-      element_div?.textContent,
+      element_div?.querySelector("p")?.textContent || element_div?.textContent || "",
       timeToDateString(Number.parseInt(element_div?.dataset.time!)),
+      Number.parseInt(element_div?.dataset.time!) || timeNowSeconds(),
     ]);
 
-    await vn_storage.deleteLines(details as [[number, string, string]]);
+    await vn_storage.deleteLines(details as any);
     parents.forEach((element_div) => element_div?.remove());
+  };
+
+  let showDeleteContextMenu = $state(false);
+  let deleteContextMenuX = $state(0);
+  let deleteContextMenuY = $state(0);
+  let hasLastDeletion = $state(false);
+  let lastDeletionCount = $state(0);
+  let lastDeletionGame = $state("");
+
+  const handleDeleteContextMenu = async (e: MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const data = await browser.storage.local.get("last_deletion_backup");
+    const backup = data.last_deletion_backup;
+    hasLastDeletion = !!(backup && Array.isArray(backup.lines) && backup.lines.length > 0);
+    lastDeletionCount = backup?.lines?.length ?? 0;
+    lastDeletionGame = backup?.game_name ?? "Game";
+    deleteContextMenuX = e.clientX;
+    deleteContextMenuY = e.clientY;
+    showDeleteContextMenu = true;
+  };
+
+  const restoreLastDeletion = async () => {
+    showDeleteContextMenu = false;
+    const data = await browser.storage.local.get("last_deletion_backup");
+    const backup = data.last_deletion_backup;
+
+    if (!backup || !Array.isArray(backup.lines) || backup.lines.length === 0) {
+      alert("No deleted lines found to restore.");
+      return;
+    }
+
+    const confirmed = confirm(
+      `Restore ${backup.lines.length} deleted ${backup.lines.length === 1 ? 'line' : 'lines'} for "${backup.game_name || 'Game'}"?`,
+    );
+    if (!confirmed) return;
+
+    // 1. Put line records back into storage:
+    const lineEntries: Record<string, [string, number]> = {};
+    for (const item of backup.lines) {
+      lineEntries[JSON.stringify([backup.uuid, item.id])] = [item.line, item.time];
+    }
+    await browser.storage.local.set(lineEntries);
+
+    // 2. Restore stats to instance storage:
+    if (vn_storage && vn_storage.uuid === backup.uuid && vn_storage.instance_storage) {
+      await vn_storage.instance_storage.addStats(backup.date_stats);
+
+      const maxRestoredId = Math.max(...backup.lines.map((l: any) => l.id));
+      if (maxRestoredId > (vn_storage.instance_storage.details.last_line_added ?? -1)) {
+        await vn_storage.instance_storage.updateDetails({
+          last_line_added: maxRestoredId,
+        });
+      }
+
+      const updatedLines = await vn_storage.instance_storage.getLines();
+      if (updatedLines) {
+        lines = (updatedLines as [string, number, string, number][]).sort(
+          (a, b) => a[1] - b[1],
+        );
+      }
+    } else {
+      const targetInstance = await InstanceStorage.buildInstance(backup.uuid);
+      await targetInstance.addStats(backup.date_stats);
+      const maxRestoredId = Math.max(...backup.lines.map((l: any) => l.id));
+      if (maxRestoredId > (targetInstance.details.last_line_added ?? -1)) {
+        await targetInstance.updateDetails({
+          last_line_added: maxRestoredId,
+        });
+      }
+    }
+
+    // 3. Clear the backup
+    await browser.storage.local.remove("last_deletion_backup");
+    hasLastDeletion = false;
+    lastDeletionCount = 0;
+
+    alert(`Successfully restored ${backup.lines.length} ${backup.lines.length === 1 ? 'line' : 'lines'}!`);
   };
 </script>
 
@@ -312,9 +393,36 @@
   <button
     id="delete-selection"
     class="material-icons delete-button"
-    onclick={deleteLines}>delete</button
-  >
+    onclick={deleteLines}
+    oncontextmenu={handleDeleteContextMenu}
+    title="Click to delete selected lines. Right-click to restore last deletion."
+  >delete</button>
 </div>
+
+<ContextMenu
+  bind:show={showDeleteContextMenu}
+  x={deleteContextMenuX}
+  y={deleteContextMenuY}
+  title="Line Recovery"
+>
+  {#if hasLastDeletion}
+    <button
+      type="button"
+      class="ctx-item"
+      onclick={restoreLastDeletion}
+    >
+      <span class="material-icons text-sm text-accent">history</span>
+      <span>Restore last deletion ({lastDeletionCount} {lastDeletionCount === 1 ? 'line' : 'lines'})</span>
+    </button>
+    <div class="px-3 py-1 text-[10px] text-muted">
+      From: {lastDeletionGame}
+    </div>
+  {:else}
+    <div class="px-3 py-2 text-xs text-muted">
+      No recent deletion to restore
+    </div>
+  {/if}
+</ContextMenu>
 
 <div
   class="px-12"

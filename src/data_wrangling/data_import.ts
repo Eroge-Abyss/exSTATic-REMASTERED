@@ -178,6 +178,33 @@ export async function importStats(data: DataEntry[]) {
     storageToWrite[date] = entries;
   }
 
+  // Save pre-import backup snapshot before writing
+  const allKeysToTouch = [
+    ...Object.keys(storageToWrite),
+    ...Object.keys(dailyStatsToWrite),
+  ];
+  const previousState = await browser.storage.local.get(allKeysToTouch);
+  const backupData: Record<string, unknown> = {};
+  const newKeys: string[] = [];
+
+  for (const key of allKeysToTouch) {
+    if (previousState.hasOwnProperty(key) && previousState[key] !== undefined) {
+      backupData[key] = previousState[key];
+    } else {
+      newKeys.push(key);
+    }
+  }
+
+  await browser.storage.local.set({
+    last_import_backup: {
+      type: "stats",
+      timestamp: Date.now(),
+      entryCount: validEntries.length,
+      data: backupData,
+      new_keys: newKeys,
+    },
+  });
+
   // 5. Batch write to storage
   await batchSet(storageToWrite, 500);
   if (Object.keys(dailyStatsToWrite).length > 0) {
@@ -199,6 +226,32 @@ export async function importLines(data: { [key: string]: string | number }[]) {
     if (!byUuid.has(uuid)) byUuid.set(uuid, []);
     byUuid.get(uuid)!.push(entry);
   }
+
+  // Pre-import backup snapshot of lines and details
+  const backupData: Record<string, unknown> = {};
+  for (const uuid of byUuid.keys()) {
+    const instance_storage = await InstanceStorage.buildInstance(uuid);
+    const lastLineAdded = instance_storage.details["last_line_added"] ?? -1;
+    backupData[uuid] = { ...instance_storage.details };
+
+    if (lastLineAdded >= 0) {
+      const existingKeys = [...Array(lastLineAdded + 1).keys()].map((i) =>
+        JSON.stringify([uuid, i]),
+      );
+      const existingLines = await browser.storage.local.get(existingKeys);
+      Object.assign(backupData, existingLines);
+    }
+  }
+
+  await browser.storage.local.set({
+    last_import_backup: {
+      type: "lines",
+      timestamp: Date.now(),
+      entryCount: data.length,
+      data: backupData,
+      new_keys: [],
+    },
+  });
 
   for (const [uuid, lines] of byUuid) {
     const instance_storage = await InstanceStorage.buildInstance(uuid);
@@ -225,4 +278,45 @@ export async function importLines(data: { [key: string]: string | number }[]) {
       last_line_added: lines.length - 1,
     });
   }
+}
+
+export async function revertLastImport(): Promise<{ success: boolean; message: string }> {
+  const stored = await browser.storage.local.get("last_import_backup");
+  const backup = stored.last_import_backup;
+  if (!backup || !backup.data) {
+    return { success: false, message: "No previous import found to revert." };
+  }
+
+  const toSet: Record<string, unknown> = {};
+  const toRemove: string[] = [];
+
+  for (const [key, value] of Object.entries(backup.data)) {
+    if (value === undefined || value === null) {
+      toRemove.push(key);
+    } else {
+      toSet[key] = value;
+    }
+  }
+
+  if (Array.isArray(backup.new_keys)) {
+    for (const key of backup.new_keys) {
+      if (!toSet.hasOwnProperty(key) && !toRemove.includes(key)) {
+        toRemove.push(key);
+      }
+    }
+  }
+
+  if (Object.keys(toSet).length > 0) {
+    await batchSet(toSet, 500);
+  }
+  if (toRemove.length > 0) {
+    await browser.storage.local.remove(toRemove);
+  }
+
+  await browser.storage.local.remove("last_import_backup");
+
+  return {
+    success: true,
+    message: `Successfully reverted the last ${backup.type || "data"} import (${backup.entryCount || Object.keys(toSet).length} records restored).`,
+  };
 }
