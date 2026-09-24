@@ -9,6 +9,7 @@
   import MenuOption from "../components/interface/menu_option.svelte";
   import LineHolder from "../components/interface/line_holder.svelte";
   import ContextMenu from "../components/interface/context_menu.svelte";
+  import WsPlug from "../components/interface/ws_plug.svelte";
   import { applyTheme } from "../themes/apply_theme";
 
   applyTheme();
@@ -287,27 +288,18 @@
             class="ws-icons-wrap flex items-center gap-3 whitespace-nowrap {barHidden ? 'collapsed' : ''}"
           >
             {#if showTexthookerWs}
-              <span
-                class="ws-plug-wrap"
-                class:connected={lunaConnected}
+              <WsPlug
+                type="texthooker"
+                connected={lunaConnected}
                 title={lunaConnected ? "Texthooker: connected" : "Texthooker: disconnected"}
-              >
-                <svg class="ws-plug" viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M21.4 7.5C22.2 8.3 22.2 9.6 21.4 10.3L18.6 13.1L10.8 5.3L13.6 2.5C14.4 1.7 15.7 1.7 16.4 2.5L18.2 4.3L21.2 1.3L22.6 2.7L19.6 5.7L21.4 7.5M15.6 13.3L14.2 11.9L11.4 14.7L9.3 12.6L12.1 9.8L10.7 8.4L7.9 11.2L6.4 9.8L3.6 12.6C2.8 13.4 2.8 14.7 3.6 15.4L5.4 17.2L1.4 21.2L2.8 22.6L6.8 18.6L8.6 20.4C9.4 21.2 10.7 21.2 11.4 20.4L14.2 17.6L12.8 16.2L15.6 13.3Z" />
-                </svg>
-              </span>
+              />
             {/if}
             {#if showTadokuWs}
-              <span
-                class="ws-plug-wrap"
-                class:connected={tadokuConnected}
+              <WsPlug
+                type="tadoku"
+                connected={tadokuConnected}
                 title={tadokuConnected ? "Tadoku: connected" : "Tadoku: disconnected"}
-              >
-                <svg class="ws-plug" viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M21.4 7.5C22.2 8.3 22.2 9.6 21.4 10.3L18.6 13.1L10.8 5.3L13.6 2.5C14.4 1.7 15.7 1.7 16.4 2.5L18.2 4.3L21.2 1.3L22.6 2.7L19.6 5.7L21.4 7.5M15.6 13.3L14.2 11.9L11.4 14.7L9.3 12.6L12.1 9.8L10.7 8.4L7.9 11.2L6.4 9.8L3.6 12.6C2.8 13.4 2.8 14.7 3.6 15.4L5.4 17.2L1.4 21.2L2.8 22.6L6.8 18.6L8.6 20.4C9.4 21.2 10.7 21.2 11.4 20.4L14.2 17.6L12.8 16.2L15.6 13.3Z" />
-                </svg>
-                <span class="ws-badge">多</span>
-              </span>
+              />
             {/if}
           </div>
         {/if}
@@ -536,34 +528,4 @@
     @apply bg-block p-4 text-icon;
   }
 
-  .ws-plug-wrap {
-    position: relative;
-    display: inline-flex;
-    opacity: 0.3;
-    transition: opacity 0.5s;
-  }
-
-  .ws-plug-wrap.connected {
-    opacity: 1;
-  }
-
-  .ws-plug {
-    @apply cursor-default;
-    width: 1.5rem;
-    height: 1.5rem;
-    display: block;
-  }
-
-  .ws-badge {
-    position: absolute;
-    bottom: -2px;
-    right: -4px;
-    font-size: 0.7rem;
-    font-weight: 700;
-    font-family: system-ui, sans-serif;
-    line-height: 1;
-    opacity: 0.85;
-    pointer-events: none;
-    user-select: none;
-  }
 </style>

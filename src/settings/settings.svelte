@@ -2,6 +2,7 @@
   import SettingRow from "../components/interface/setting_row.svelte";
   import SettingOption from "../components/interface/setting_option.svelte";
   import SettingToggle from "../components/interface/setting_toggle.svelte";
+  import WsPlug from "../components/interface/ws_plug.svelte";
   import type { MokuroStorage } from "../mokuro/mokuro_storage";
   import type { TTUStorage } from "../ttu/ttu_storage";
   import { VNStorage } from "../vn/vn_storage";
@@ -494,9 +495,7 @@
             onclick={toggleTexthookerWs}
             title={showTexthookerWs ? "Texthooker: visible (click to hide)" : "Texthooker: hidden (click to show)"}
           >
-            <svg class="h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M21.4 7.5C22.2 8.3 22.2 9.6 21.4 10.3L18.6 13.1L10.8 5.3L13.6 2.5C14.4 1.7 15.7 1.7 16.4 2.5L18.2 4.3L21.2 1.3L22.6 2.7L19.6 5.7L21.4 7.5M15.6 13.3L14.2 11.9L11.4 14.7L9.3 12.6L12.1 9.8L10.7 8.4L7.9 11.2L6.4 9.8L3.6 12.6C2.8 13.4 2.8 14.7 3.6 15.4L5.4 17.2L1.4 21.2L2.8 22.6L6.8 18.6L8.6 20.4C9.4 21.2 10.7 21.2 11.4 20.4L14.2 17.6L12.8 16.2L15.6 13.3Z" />
-            </svg>
+            <WsPlug type="texthooker" />
             <span>Texthooker</span>
           </button>
 
@@ -508,12 +507,7 @@
             onclick={toggleTadokuWs}
             title={showTadokuWs ? "Tadoku: visible (click to hide)" : "Tadoku: hidden (click to show)"}
           >
-            <span class="relative inline-flex items-center">
-              <svg class="h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M21.4 7.5C22.2 8.3 22.2 9.6 21.4 10.3L18.6 13.1L10.8 5.3L13.6 2.5C14.4 1.7 15.7 1.7 16.4 2.5L18.2 4.3L21.2 1.3L22.6 2.7L19.6 5.7L21.4 7.5M15.6 13.3L14.2 11.9L11.4 14.7L9.3 12.6L12.1 9.8L10.7 8.4L7.9 11.2L6.4 9.8L3.6 12.6C2.8 13.4 2.8 14.7 3.6 15.4L5.4 17.2L1.4 21.2L2.8 22.6L6.8 18.6L8.6 20.4C9.4 21.2 10.7 21.2 11.4 20.4L14.2 17.6L12.8 16.2L15.6 13.3Z" />
-              </svg>
-              <span class="ws-badge">多</span>
-            </span>
+            <WsPlug type="tadoku" />
             <span>Tadoku</span>
           </button>
         </SettingRow>
@@ -1033,16 +1027,4 @@
     color: var(--exs-title, #818cf8);
   }
 
-  .ws-badge {
-    position: absolute;
-    bottom: -2px;
-    right: -4px;
-    font-size: 8px;
-    font-weight: 700;
-    line-height: 1;
-    background: var(--exs-block, #0f172a);
-    border-radius: 2px;
-    padding: 0 1px;
-    color: var(--exs-accent, #818cf8);
-  }
 </style>
