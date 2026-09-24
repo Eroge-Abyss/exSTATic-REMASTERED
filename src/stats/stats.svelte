@@ -46,6 +46,7 @@
     permanentDeleteGame,
     renameGame,
     setGameVndbId,
+    setGameTadokuAutoLog,
     getDuplicateGroups,
     mergeGames,
     undoMerge,
@@ -765,6 +766,16 @@
     editingVndbUuid = null;
     editVndbValue = "";
     showToast(trimmed ? `Saved VNDB ID: ${trimmed}` : "Cleared VNDB ID");
+  }
+
+  async function toggleGameTadokuAutoLog(uuid: string, gameName: string, newState: boolean) {
+    await setGameTadokuAutoLog(uuid, newState);
+    allInstances = await getAllInstances();
+    showToast(
+      newState
+        ? `Tadoku auto-log enabled for "${gameName}"`
+        : `Tadoku auto-log disabled for "${gameName}"`
+    );
   }
 
   function handleAddCustomSession(dateStr: string, game: { uuid: string; name: string }) {
@@ -2825,7 +2836,7 @@
               {:else}
                 <span class="truncate text-sm font-medium text-strong">{game.name}</span>
                 <span class="type-badge">{game.type}</span>
-                {#if muramasaLogging && (game.type === "vn" || !game.type)}
+                {#if (muramasaLogging || tadokuLogging) && (game.type === "vn" || !game.type)}
                   {#if editingVndbUuid === game.uuid}
                     <div class="flex items-center gap-1 ml-1">
                       <input
@@ -2861,11 +2872,11 @@
                           href="https://vndb.org/{currentVndb}"
                           target="_blank"
                           rel="noreferrer"
-                          class="badge-vndb text-[11px] font-mono px-1.5 py-0.5 rounded bg-sky-500/10 text-sky-400 hover:underline inline-flex items-center gap-1"
+                          class="badge-vndb text-[11px] font-mono px-1.5 py-0.5 rounded hover:underline inline-flex items-center gap-1"
                           title="Open {currentVndb} on VNDB"
                         >
                           <span>{currentVndb}</span>
-                          <svg class="h-2.5 w-2.5 opacity-60" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                          <svg class="h-2.5 w-2.5 opacity-70" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
                             <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
                             <polyline points="15 3 21 3 21 9"></polyline>
                             <line x1="10" y1="14" x2="21" y2="3"></line>
@@ -2929,6 +2940,20 @@
 
             {#if renamingUuid !== game.uuid}
               <div class="flex shrink-0 items-center gap-1">
+                {#if tadokuLogging && (game.type === "vn" || !game.type)}
+                  {@const isAuto = game.tadoku_auto_log !== false}
+                  <button
+                    type="button"
+                    class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium transition-colors cursor-pointer mr-0.5 {isAuto
+                      ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/25'
+                      : 'bg-surface text-muted border border-border/50 hover:text-strong'}"
+                    title="{isAuto ? 'Tadoku Auto-Log: ON (Click to disable auto-logging for this game)' : 'Tadoku Auto-Log: OFF (Click to enable auto-logging for this game)'}"
+                    onclick={() => toggleGameTadokuAutoLog(game.uuid, game.name, !isAuto)}
+                  >
+                    <span class="h-1.5 w-1.5 rounded-full {isAuto ? 'bg-emerald-400' : 'bg-muted'}"></span>
+                    <span>Tadoku {isAuto ? "Auto" : "Off"}</span>
+                  </button>
+                {/if}
                 <button
                   class="btn-action"
                   title="Rename"
@@ -4905,6 +4930,18 @@
     background: var(--exs-menu-bg, #334155);
     color: var(--exs-text-muted, #9ca3af);
     border: 1px solid var(--exs-border, transparent);
+  }
+
+  /* VNDB badge synced with theme */
+  .badge-vndb {
+    background: color-mix(in srgb, var(--exs-accent, #818cf8) 12%, transparent);
+    color: var(--exs-accent, #818cf8);
+    border: 1px solid color-mix(in srgb, var(--exs-accent, #818cf8) 25%, transparent);
+    transition: background 0.15s ease, border-color 0.15s ease;
+  }
+  .badge-vndb:hover {
+    background: color-mix(in srgb, var(--exs-accent, #818cf8) 22%, transparent);
+    border-color: color-mix(in srgb, var(--exs-accent, #818cf8) 45%, transparent);
   }
 
   /* Rename input */

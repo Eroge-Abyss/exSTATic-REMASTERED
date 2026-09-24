@@ -276,6 +276,7 @@ export async function runTadokuDayResetAutoPush(): Promise<{ pushedCount: number
       const rawDetails = await browser.storage.local.get(uuid);
       const details = rawDetails[uuid];
       if (!details) continue;
+      if (details.tadoku_auto_log === false) continue;
 
       const statKey = JSON.stringify([entryClient || client, uuid, yesterday]);
       const statRaw = await browser.storage.local.get(statKey);
