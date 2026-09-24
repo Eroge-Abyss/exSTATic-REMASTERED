@@ -4,6 +4,7 @@
     connected?: boolean;
     title?: string;
     class?: string;
+    size?: string;
   }
 
   let {
@@ -11,6 +12,7 @@
     connected = true,
     title,
     class: className = "",
+    size = "1.5rem",
   }: Props = $props();
 </script>
 
@@ -18,6 +20,7 @@
   class="ws-plug-wrap {className}"
   class:connected
   {title}
+  style="font-size: {size};"
 >
   <span class="material-icons ws-plug">electrical_services</span>
   {#if type === "tadoku"}
@@ -34,6 +37,7 @@
     opacity: 0.3;
     transition: opacity 0.5s;
     line-height: 1;
+    vertical-align: middle;
   }
 
   .ws-plug-wrap.connected {
@@ -42,18 +46,18 @@
 
   .ws-plug {
     cursor: default;
-    font-size: 1.5rem;
+    font-size: 1em;
     line-height: 1;
     display: inline-block;
   }
 
   .ws-badge {
     position: absolute;
-    top: -2px;
-    right: -4px;
-    font-size: 0.7rem;
+    top: -0.083em;
+    right: -0.167em;
+    font-size: 0.467em;
     font-weight: 700;
-    font-family: system-ui, sans-serif;
+    font-family: system-ui, -apple-system, sans-serif;
     line-height: 1;
     opacity: 0.85;
     pointer-events: none;

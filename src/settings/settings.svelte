@@ -495,7 +495,7 @@
             onclick={toggleTexthookerWs}
             title={showTexthookerWs ? "Texthooker: visible (click to hide)" : "Texthooker: hidden (click to show)"}
           >
-            <WsPlug type="texthooker" />
+            <WsPlug type="texthooker" size="1.2rem" />
             <span>Texthooker</span>
           </button>
 
@@ -507,7 +507,7 @@
             onclick={toggleTadokuWs}
             title={showTadokuWs ? "Tadoku: visible (click to hide)" : "Tadoku: hidden (click to show)"}
           >
-            <WsPlug type="tadoku" />
+            <WsPlug type="tadoku" size="1.2rem" />
             <span>Tadoku</span>
           </button>
         </SettingRow>
