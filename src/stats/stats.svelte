@@ -4325,6 +4325,69 @@
       </button>
       <div class="ctx-divider"></div>
     {/if}
+
+    {#if muramasaLogging}
+      {@const vnGames = getGamesPlayedOnDate(dayMenu.dateStr).filter((g) => g.type === "vn" || getVndbIdForGame(g.uuid, g.name))}
+      {#if vnGames.length > 0}
+        <div class="ctx-section-title">
+          <svg class="h-3 w-3 text-accent shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+          </svg>
+          <span>Muramasa Discord Log:</span>
+        </div>
+        {#if vnGames.length === 1}
+          <button
+            class="ctx-item font-medium text-accent"
+            onclick={() => {
+              copySingleMuramasaLog(
+                vnGames[0].name,
+                vnGames[0].uuid,
+                vnGames[0].chars,
+                vnGames[0].time,
+                dayMenu.dateStr
+              );
+              closeDayMenu();
+            }}
+          >
+            <svg class="h-3.5 w-3.5 text-accent shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+            </svg>
+            <span>Copy Log ({vnGames[0].name})</span>
+          </button>
+        {:else}
+          <button
+            class="ctx-item font-semibold text-accent"
+            onclick={() => {
+              copyAllMuramasaLogsForDay(dayMenu.dateStr, vnGames);
+              closeDayMenu();
+            }}
+            title="Writes each command sequentially to Windows Clipboard History (Win+V)"
+          >
+            <svg class="h-3.5 w-3.5 text-accent shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+            </svg>
+            <span>Copy All Logs ({vnGames.length})</span>
+          </button>
+          {#each vnGames as g}
+            <button
+              class="ctx-item pl-5 truncate"
+              onclick={() => {
+                copySingleMuramasaLog(g.name, g.uuid, g.chars, g.time, dayMenu.dateStr);
+                closeDayMenu();
+              }}
+            >
+              <span class="text-[10px] text-muted">•</span>
+              <span class="truncate">Copy {g.name}</span>
+            </button>
+          {/each}
+        {/if}
+        <div class="ctx-divider"></div>
+      {/if}
+    {/if}
+
     {#if dayMenu.games.length === 0}
       <div class="px-3 py-2 text-xs text-muted">
         No games tracked
@@ -4387,68 +4450,6 @@
           <span class="truncate">{g.name}</span>
         </button>
       {/each}
-    {/if}
-
-    {#if muramasaLogging}
-      {@const vnGames = getGamesPlayedOnDate(dayMenu.dateStr).filter((g) => g.type === "vn" || getVndbIdForGame(g.uuid, g.name))}
-      {#if vnGames.length > 0}
-        <div class="ctx-divider"></div>
-        <div class="ctx-section-title">
-          <svg class="h-3 w-3 text-accent shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
-            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
-          </svg>
-          <span>Muramasa Discord Log:</span>
-        </div>
-        {#if vnGames.length === 1}
-          <button
-            class="ctx-item font-medium text-accent"
-            onclick={() => {
-              copySingleMuramasaLog(
-                vnGames[0].name,
-                vnGames[0].uuid,
-                vnGames[0].chars,
-                vnGames[0].time,
-                dayMenu.dateStr
-              );
-              closeDayMenu();
-            }}
-          >
-            <svg class="h-3.5 w-3.5 text-accent shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
-              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
-            </svg>
-            <span>Copy Log ({vnGames[0].name})</span>
-          </button>
-        {:else}
-          <button
-            class="ctx-item font-semibold text-accent"
-            onclick={() => {
-              copyAllMuramasaLogsForDay(dayMenu.dateStr, vnGames);
-              closeDayMenu();
-            }}
-            title="Writes each command sequentially to Windows Clipboard History (Win+V)"
-          >
-            <svg class="h-3.5 w-3.5 text-accent shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
-              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
-            </svg>
-            <span>Copy All Logs ({vnGames.length})</span>
-          </button>
-          {#each vnGames as g}
-            <button
-              class="ctx-item pl-5 truncate"
-              onclick={() => {
-                copySingleMuramasaLog(g.name, g.uuid, g.chars, g.time, dayMenu.dateStr);
-                closeDayMenu();
-              }}
-            >
-              <span class="text-[10px] text-muted">•</span>
-              <span class="truncate">Copy {g.name}</span>
-            </button>
-          {/each}
-        {/if}
-      {/if}
     {/if}
   </ContextMenu>
 
