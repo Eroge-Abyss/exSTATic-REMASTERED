@@ -149,10 +149,10 @@
   loadDeletedGames();
 
   // All tracked instances (including those with no stats yet)
-  let allInstances = $state<{ uuid: string; name: string; type: string; vndb_id?: string }[]>([]);
+  let allInstances = $state<{ uuid: string; name: string; type: string; vndb_id?: string; tadoku_auto_log?: boolean }[]>([]);
   async function loadAllInstances() {
     allInstances = await getAllInstances();
-    if (muramasaLogging) {
+    if (muramasaLogging || tadokuLogging) {
       autoDetectMissingVndbIds();
     }
   }
@@ -540,6 +540,10 @@
     new Map(allInstances.map((i) => [i.uuid, i.vndb_id || ""]))
   );
 
+  let gameTadokuAutoLogMap = $derived(
+    new Map(allInstances.map((i) => [i.uuid, i.tadoku_auto_log !== false]))
+  );
+
   function getVndbIdForGame(uuid: string, name?: string): string {
     const direct = gameVndbMap.get(uuid);
     if (direct) return direct;
@@ -590,22 +594,34 @@
     }, 3200);
   }
 
+  const failedVndbSearchUuids = new Set<string>();
   let autoDetectingBatch = $state(false);
 
   async function autoDetectMissingVndbIds() {
-    if (autoDetectingBatch) return;
+    if (autoDetectingBatch || (!muramasaLogging && !tadokuLogging)) return;
     const vnWithoutId = allInstances.filter(
-      (inst) => (inst.type === "vn" || !inst.type) && !inst.vndb_id && inst.name?.trim()
+      (inst) =>
+        (inst.type === "vn" || !inst.type) &&
+        !inst.vndb_id &&
+        inst.name?.trim() &&
+        !failedVndbSearchUuids.has(inst.uuid)
     );
     if (vnWithoutId.length === 0) return;
     autoDetectingBatch = true;
     try {
       for (const inst of vnWithoutId) {
-        await browser.runtime.sendMessage({
-          action: "auto_detect_vndb",
-          uuid: inst.uuid,
-          query: inst.name,
-        });
+        try {
+          const res = await browser.runtime.sendMessage({
+            action: "auto_detect_vndb",
+            uuid: inst.uuid,
+            query: inst.name,
+          });
+          if (!res || !res.vndb_id) {
+            failedVndbSearchUuids.add(inst.uuid);
+          }
+        } catch {
+          failedVndbSearchUuids.add(inst.uuid);
+        }
         await new Promise((r) => setTimeout(r, 250));
       }
     } finally {
@@ -613,12 +629,6 @@
       allInstances = await getAllInstances();
     }
   }
-
-  $effect(() => {
-    if (muramasaLogging && allInstances.length > 0) {
-      autoDetectMissingVndbIds();
-    }
-  });
 
   async function ensureVndbId(uuid: string, gameName: string): Promise<string> {
     let existingId = getVndbIdForGame(uuid, gameName);
@@ -724,6 +734,7 @@
 
   async function autoDetectVndbId(uuid: string, gameName: string) {
     searchingVndbUuid = uuid;
+    failedVndbSearchUuids.delete(uuid);
     try {
       const response = await browser.runtime.sendMessage({
         action: "auto_detect_vndb",
@@ -735,10 +746,12 @@
         showToast(`Matched "${gameName}" -> ${response.vndb_id} (${response.title || gameName})`);
         return response.vndb_id;
       } else {
+        failedVndbSearchUuids.add(uuid);
         showToast(`No VNDB match found for "${gameName}". You can set it manually.`);
       }
     } catch (err) {
       console.error("VNDB search failed:", err);
+      failedVndbSearchUuids.add(uuid);
       showToast("VNDB search failed. Check network connection.");
     } finally {
       searchingVndbUuid = null;
@@ -757,6 +770,7 @@
   }
 
   async function saveManualVndbId(uuid: string) {
+    failedVndbSearchUuids.delete(uuid);
     let trimmed = editVndbValue.trim();
     if (trimmed && /^\d+$/.test(trimmed)) {
       trimmed = `v${trimmed}`;
@@ -891,7 +905,8 @@
       renamingUuid = null;
       renameValue = "";
       await refreshData();
-      if (muramasaLogging) {
+      failedVndbSearchUuids.delete(uuid);
+      if (muramasaLogging || tadokuLogging) {
         await autoDetectVndbId(uuid, newName);
       }
     }
@@ -1041,7 +1056,7 @@
     await loadAllInstances();
     newTitleName = "";
     creatingTitle = false;
-    if (newTitleType === "vn" && muramasaLogging) {
+    if (newTitleType === "vn" && (muramasaLogging || tadokuLogging)) {
       autoDetectVndbId(inst.uuid, titleName);
     }
     // Immediately open the editor for the new title
@@ -2941,17 +2956,27 @@
             {#if renamingUuid !== game.uuid}
               <div class="flex shrink-0 items-center gap-1">
                 {#if tadokuLogging && (game.type === "vn" || !game.type)}
-                  {@const isAuto = game.tadoku_auto_log !== false}
+                  {@const isAuto = gameTadokuAutoLogMap.get(game.uuid) !== false}
                   <button
                     type="button"
-                    class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium transition-colors cursor-pointer mr-0.5 {isAuto
-                      ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/25'
-                      : 'bg-surface text-muted border border-border/50 hover:text-strong'}"
-                    title="{isAuto ? 'Tadoku Auto-Log: ON (Click to disable auto-logging for this game)' : 'Tadoku Auto-Log: OFF (Click to enable auto-logging for this game)'}"
+                    class="btn-action {isAuto ? 'btn-tadoku-active' : 'btn-tadoku-inactive'}"
+                    title="{isAuto ? 'Tadoku Auto-Log: Enabled (Click to disable auto-logging for this game)' : 'Tadoku Auto-Log: Disabled (Click to enable auto-logging for this game)'}"
+                    aria-label="{isAuto ? 'Disable Tadoku auto-log for ' + game.name : 'Enable Tadoku auto-log for ' + game.name}"
                     onclick={() => toggleGameTadokuAutoLog(game.uuid, game.name, !isAuto)}
                   >
-                    <span class="h-1.5 w-1.5 rounded-full {isAuto ? 'bg-emerald-400' : 'bg-muted'}"></span>
-                    <span>Tadoku {isAuto ? "Auto" : "Off"}</span>
+                    <svg class="h-3.5 w-3.5" viewBox="0 0 64 64">
+                      <defs>
+                        <mask id="tdk-mask-{game.uuid}">
+                          <rect width="64" height="64" fill="white"/>
+                          <path d="M2 43L62 17" stroke="black" stroke-width="8"/>
+                        </mask>
+                      </defs>
+                      {#if isAuto}
+                        <path fill="currentColor" mask="url(#tdk-mask-{game.uuid})" d="M7 38h13v18H7zM25 24h14v32H25zM44 8h13v48H44z"/>
+                      {:else}
+                        <path fill="none" stroke="currentColor" stroke-width="5" stroke-linejoin="round" mask="url(#tdk-mask-{game.uuid})" d="M7 38h13v18H7zM25 24h14v32H25zM44 8h13v48H44z"/>
+                      {/if}
+                    </svg>
                   </button>
                 {/if}
                 <button
@@ -4826,6 +4851,28 @@
     background: color-mix(in srgb, #f43f5e 25%, transparent);
     color: #fb7185;
   }
+  .btn-tadoku-active {
+    background: color-mix(in srgb, var(--exs-accent, #818cf8) 15%, transparent);
+    color: var(--exs-accent, #818cf8);
+    border: 1px solid color-mix(in srgb, var(--exs-accent, #818cf8) 30%, transparent);
+  }
+  .btn-tadoku-active:hover {
+    background: color-mix(in srgb, var(--exs-accent, #818cf8) 25%, transparent);
+    color: var(--exs-accent, #818cf8);
+    border-color: color-mix(in srgb, var(--exs-accent, #818cf8) 45%, transparent);
+  }
+  .btn-tadoku-inactive {
+    background: transparent;
+    color: var(--exs-text-muted, #9ca3af);
+    opacity: 0.45;
+    border: 1px solid var(--exs-border, transparent);
+  }
+  .btn-tadoku-inactive:hover {
+    background: var(--exs-menu-bg, #334155);
+    color: var(--exs-text-strong, #ffffff);
+    opacity: 0.85;
+    border-color: var(--exs-border, #475569);
+  }
   .btn-restore {
     background: color-mix(in srgb, #10b981 15%, transparent);
     color: #34d399;
@@ -4937,11 +4984,9 @@
     background: color-mix(in srgb, var(--exs-accent, #818cf8) 12%, transparent);
     color: var(--exs-accent, #818cf8);
     border: 1px solid color-mix(in srgb, var(--exs-accent, #818cf8) 25%, transparent);
-    transition: background 0.15s ease, border-color 0.15s ease;
   }
   .badge-vndb:hover {
-    background: color-mix(in srgb, var(--exs-accent, #818cf8) 22%, transparent);
-    border-color: color-mix(in srgb, var(--exs-accent, #818cf8) 45%, transparent);
+    text-decoration: underline;
   }
 
   /* Rename input */
