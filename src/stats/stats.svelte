@@ -128,9 +128,9 @@
     }
     if (changes["tadoku_session_expired"]) {
       tadokuSessionExpired = !!changes["tadoku_session_expired"].newValue;
-      if (!tadokuSessionExpired) {
-        tadokuBannerDismissed = false;
-      }
+    }
+    if (changes["tadoku_banner_dismissed"]) {
+      tadokuBannerDismissed = !!changes["tadoku_banner_dismissed"].newValue;
     }
     clearTimeout(refreshTimer);
     refreshTimer = setTimeout(async () => {
@@ -508,11 +508,13 @@
       "tadoku_logging",
       "tadoku_manual_logging",
       "tadoku_session_expired",
+      "tadoku_banner_dismissed",
     ]);
     muramasaLogging = !!res.muramasa_logging;
     tadokuLogging = !!res.tadoku_logging;
     tadokuManualLogging = !!res.tadoku_manual_logging;
     tadokuSessionExpired = !!res.tadoku_session_expired;
+    tadokuBannerDismissed = !!res.tadoku_banner_dismissed;
 
     if (tadokuLogging) {
       checkTadokuSession();
@@ -525,12 +527,19 @@
       const res = await browser.runtime.sendMessage({ action: "tadoku_status" });
       if (res && res.loggedIn) {
         tadokuSessionExpired = false;
-        tadokuBannerDismissed = false;
-        await browser.storage.local.set({ tadoku_session_expired: false });
+        await browser.storage.local.set({
+          tadoku_session_expired: false,
+          tadoku_banner_dismissed: false,
+        });
       }
     } catch {
       // ignore network errors
     }
+  }
+
+  async function dismissTadokuBanner() {
+    tadokuBannerDismissed = true;
+    await browser.storage.local.set({ tadoku_banner_dismissed: true });
   }
 
   function handleWindowFocus() {
@@ -2550,7 +2559,7 @@
           class="p-1 text-amber-300/70 hover:text-amber-100 transition-colors cursor-pointer rounded"
           title="Dismiss banner"
           aria-label="Dismiss banner"
-          onclick={() => (tadokuBannerDismissed = true)}
+          onclick={dismissTadokuBanner}
         >
           <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <line x1="18" y1="6" x2="6" y2="18"></line>

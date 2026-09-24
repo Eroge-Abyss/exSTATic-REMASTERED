@@ -466,15 +466,6 @@
       {/if}
       <SettingRow label="Auto-join Official Contests">
         <div class="flex items-center gap-3">
-          <button
-            type="button"
-            class="rounded-lg px-6 py-2 font-medium transition-colors cursor-pointer {tadokuAutoJoinContest
-              ? 'bg-button text-white hover:bg-hover'
-              : 'bg-backdrop text-text hover:opacity-80'}"
-            onclick={toggleTadokuAutoJoin}
-          >
-            {tadokuAutoJoinContest ? "ON (Enabled)" : "OFF (Disabled)"}
-          </button>
           {#if tadokuContestInfo.checked}
             {#if tadokuContestInfo.active && tadokuContestInfo.title}
               <span class="inline-flex items-center gap-1.5 text-xs text-emerald-400 font-medium">
@@ -485,6 +476,15 @@
               <span class="text-xs text-muted">No active official contest</span>
             {/if}
           {/if}
+          <button
+            type="button"
+            class="rounded-lg px-6 py-2 font-medium transition-colors cursor-pointer {tadokuAutoJoinContest
+              ? 'bg-button text-white hover:bg-hover'
+              : 'bg-backdrop text-text hover:opacity-80'}"
+            onclick={toggleTadokuAutoJoin}
+          >
+            {tadokuAutoJoinContest ? "ON (Enabled)" : "OFF (Disabled)"}
+          </button>
         </div>
       </SettingRow>
       <SettingRow label="Manual Logging">
