@@ -2959,7 +2959,7 @@
                   {@const isAuto = gameTadokuAutoLogMap.get(game.uuid) !== false}
                   <button
                     type="button"
-                    class="btn-action {isAuto ? 'btn-tadoku-active' : 'btn-tadoku-inactive'}"
+                    class="cursor-pointer rounded-md p-1.5 inline-flex items-center justify-center transition-opacity {isAuto ? 'btn-tadoku-active' : 'btn-tadoku-inactive'}"
                     title="{isAuto ? 'Tadoku Auto-Log: Enabled (Click to disable auto-logging for this game)' : 'Tadoku Auto-Log: Disabled (Click to enable auto-logging for this game)'}"
                     aria-label="{isAuto ? 'Disable Tadoku auto-log for ' + game.name : 'Enable Tadoku auto-log for ' + game.name}"
                     onclick={() => toggleGameTadokuAutoLog(game.uuid, game.name, !isAuto)}
@@ -4852,26 +4852,27 @@
     color: #fb7185;
   }
   .btn-tadoku-active {
-    background: color-mix(in srgb, var(--exs-accent, #818cf8) 15%, transparent);
+    background: transparent;
     color: var(--exs-accent, #818cf8);
-    border: 1px solid color-mix(in srgb, var(--exs-accent, #818cf8) 30%, transparent);
+    border: 1px solid transparent;
   }
   .btn-tadoku-active:hover {
-    background: color-mix(in srgb, var(--exs-accent, #818cf8) 25%, transparent);
+    background: transparent;
     color: var(--exs-accent, #818cf8);
-    border-color: color-mix(in srgb, var(--exs-accent, #818cf8) 45%, transparent);
+    border-color: transparent;
+    opacity: 0.8;
   }
   .btn-tadoku-inactive {
     background: transparent;
     color: var(--exs-text-muted, #9ca3af);
-    opacity: 0.45;
-    border: 1px solid var(--exs-border, transparent);
+    opacity: 0.4;
+    border: 1px solid transparent;
   }
   .btn-tadoku-inactive:hover {
-    background: var(--exs-menu-bg, #334155);
-    color: var(--exs-text-strong, #ffffff);
-    opacity: 0.85;
-    border-color: var(--exs-border, #475569);
+    background: transparent;
+    color: var(--exs-text-muted, #9ca3af);
+    border-color: transparent;
+    opacity: 0.75;
   }
   .btn-restore {
     background: color-mix(in srgb, #10b981 15%, transparent);
