@@ -119,6 +119,12 @@
     if (changes["muramasa_logging"]) {
       muramasaLogging = !!changes["muramasa_logging"].newValue;
     }
+    if (changes["tadoku_logging"]) {
+      tadokuLogging = !!changes["tadoku_logging"].newValue;
+    }
+    if (changes["tadoku_manual_logging"]) {
+      tadokuManualLogging = !!changes["tadoku_manual_logging"].newValue;
+    }
     clearTimeout(refreshTimer);
     refreshTimer = setTimeout(async () => {
       await loadAllInstances();
@@ -482,14 +488,52 @@
     closeSessionMenu();
   }
 
-  // ---- Muramasa Discord Logging & VNDB Integration ----
+  // ---- Muramasa Discord & Tadoku Integration ----
   let muramasaLogging = $state(false);
+  let tadokuLogging = $state(false);
+  let tadokuManualLogging = $state(false);
 
-  async function loadMuramasaSetting() {
-    const res = await browser.storage.local.get("muramasa_logging");
+  async function loadIntegrationSettings() {
+    const res = await browser.storage.local.get([
+      "muramasa_logging",
+      "tadoku_logging",
+      "tadoku_manual_logging",
+    ]);
     muramasaLogging = !!res.muramasa_logging;
+    tadokuLogging = !!res.tadoku_logging;
+    tadokuManualLogging = !!res.tadoku_manual_logging;
   }
-  loadMuramasaSetting();
+  loadIntegrationSettings();
+
+  async function pushTadokuLog(
+    gameName: string,
+    uuid: string,
+    chars: number,
+    timeSeconds: number,
+    dateStr: string,
+  ) {
+    showToast("Pushing to Tadoku...");
+    try {
+      const vndbId = getVndbIdForGame(uuid, gameName);
+      const res = await browser.runtime.sendMessage({
+        action: "tadoku_post_log",
+        chars,
+        timeInSeconds: timeSeconds,
+        gameTitle: gameName,
+        vndbId,
+        date: dateStr,
+        uuid,
+      });
+      if (res && res.success) {
+        const contestNote = res.contestTitle ? ` (${res.contestTitle})` : "";
+        showToast(`Pushed to Tadoku!${contestNote}`);
+      } else {
+        showToast(res?.error ?? "Failed to push to Tadoku");
+      }
+    } catch (e: any) {
+      showToast(e?.message ?? "Failed to push to Tadoku");
+    }
+  }
 
   let gameVndbMap = $derived(
     new Map(allInstances.map((i) => [i.uuid, i.vndb_id || ""]))
@@ -4195,7 +4239,7 @@
       oncolorchange={handleColorChange}
       selectedGroup={legendSelectedGroup}
       onselect={(grp) => (legendSelectedGroup = grp)}
-      onbubblecontextmenu={muramasaLogging ? handleBubbleContextMenu : undefined}
+      onbubblecontextmenu={(muramasaLogging || (tadokuLogging && tadokuManualLogging)) ? handleBubbleContextMenu : undefined}
     />
     <MediaGraphs
       data={uuid_summary}
@@ -4245,7 +4289,7 @@
   </ContextMenu>
 
   <!-- Scatter Bubble Session Context Menu -->
-  {#if muramasaLogging}
+  {#if muramasaLogging || (tadokuLogging && tadokuManualLogging)}
     <ContextMenu
       bind:show={sessionMenu.show}
       x={sessionMenu.x}
@@ -4268,25 +4312,49 @@
           <span>{formatDurationMuramasa(sessionMenu.time)}</span>
         </div>
       </div>
-      <button
-        class="ctx-item font-medium text-accent"
-        onclick={() => {
-          copySingleMuramasaLog(
-            sessionMenu.gameName,
-            sessionMenu.uuid,
-            sessionMenu.chars,
-            sessionMenu.time,
-            sessionMenu.dateStr
-          );
-          closeSessionMenu();
-        }}
-      >
-        <svg class="h-3.5 w-3.5 text-accent shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
-          <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
-        </svg>
-        <span>Copy Muramasa Log</span>
-      </button>
+      {#if muramasaLogging}
+        <button
+          class="ctx-item font-medium text-accent"
+          onclick={() => {
+            copySingleMuramasaLog(
+              sessionMenu.gameName,
+              sessionMenu.uuid,
+              sessionMenu.chars,
+              sessionMenu.time,
+              sessionMenu.dateStr
+            );
+            closeSessionMenu();
+          }}
+        >
+          <svg class="h-3.5 w-3.5 text-accent shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+          </svg>
+          <span>Copy Muramasa Log</span>
+        </button>
+      {/if}
+      {#if tadokuLogging && tadokuManualLogging}
+        <button
+          class="ctx-item font-medium text-emerald-400"
+          onclick={() => {
+            pushTadokuLog(
+              sessionMenu.gameName,
+              sessionMenu.uuid,
+              sessionMenu.chars,
+              sessionMenu.time,
+              sessionMenu.dateStr
+            );
+            closeSessionMenu();
+          }}
+        >
+          <svg class="h-3.5 w-3.5 text-emerald-400 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+            <polyline points="17 8 12 3 7 8"></polyline>
+            <line x1="12" y1="3" x2="12" y2="15"></line>
+          </svg>
+          <span>Push to Tadoku</span>
+        </button>
+      {/if}
     </ContextMenu>
   {/if}
 
@@ -4381,6 +4449,72 @@
             >
               <span class="text-[10px] text-muted">•</span>
               <span class="truncate">Copy {g.name}</span>
+            </button>
+          {/each}
+        {/if}
+        <div class="ctx-divider"></div>
+      {/if}
+    {/if}
+
+    {#if tadokuLogging && tadokuManualLogging}
+      {@const vnGames = getGamesPlayedOnDate(dayMenu.dateStr).filter((g) => g.type === "vn" || getVndbIdForGame(g.uuid, g.name))}
+      {#if vnGames.length > 0}
+        <div class="ctx-section-title">
+          <svg class="h-3 w-3 text-emerald-400 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+            <polyline points="17 8 12 3 7 8"></polyline>
+            <line x1="12" y1="3" x2="12" y2="15"></line>
+          </svg>
+          <span>Tadoku.app:</span>
+        </div>
+        {#if vnGames.length === 1}
+          <button
+            class="ctx-item font-medium text-emerald-400"
+            onclick={() => {
+              pushTadokuLog(
+                vnGames[0].name,
+                vnGames[0].uuid,
+                vnGames[0].chars,
+                vnGames[0].time,
+                dayMenu.dateStr
+              );
+              closeDayMenu();
+            }}
+          >
+            <svg class="h-3.5 w-3.5 text-emerald-400 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+              <polyline points="17 8 12 3 7 8"></polyline>
+              <line x1="12" y1="3" x2="12" y2="15"></line>
+            </svg>
+            <span>Push Day ({vnGames[0].name})</span>
+          </button>
+        {:else}
+          <button
+            class="ctx-item font-semibold text-emerald-400"
+            onclick={async () => {
+              closeDayMenu();
+              for (const g of vnGames) {
+                await pushTadokuLog(g.name, g.uuid, g.chars, g.time, dayMenu.dateStr);
+              }
+            }}
+          >
+            <svg class="h-3.5 w-3.5 text-emerald-400 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+              <polyline points="17 8 12 3 7 8"></polyline>
+              <line x1="12" y1="3" x2="12" y2="15"></line>
+            </svg>
+            <span>Push All to Tadoku ({vnGames.length})</span>
+          </button>
+          {#each vnGames as g}
+            <button
+              class="ctx-item pl-5 truncate"
+              onclick={() => {
+                pushTadokuLog(g.name, g.uuid, g.chars, g.time, dayMenu.dateStr);
+                closeDayMenu();
+              }}
+            >
+              <span class="text-[10px] text-muted">•</span>
+              <span class="truncate">Push {g.name} ({g.chars.toLocaleString()} chars)</span>
             </button>
           {/each}
         {/if}

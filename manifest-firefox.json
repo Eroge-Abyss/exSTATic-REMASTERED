@@ -19,7 +19,9 @@
     "tabs",
     "scripting",
     "downloads",
-    "contextMenus"
+    "contextMenus",
+    "cookies",
+    "alarms"
   ],
   "host_permissions": [
     "https://kamwithk.github.io/exSTATic/**.html",
@@ -31,7 +33,9 @@
     "https://reader.ttsu.app/**",
     "file:///**/ttu-ebook.web.app/**",
     "file:///**/reader.ttsu.app/**",
-    "https://api.vndb.org/*"
+    "https://api.vndb.org/*",
+    "https://*.tadoku.app/*",
+    "https://tadoku.app/*"
   ],
   "content_security_policy": {
     "extension_pages": "script-src 'self'; object-src 'self'"

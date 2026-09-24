@@ -1,6 +1,6 @@
 console.log("exSTATic");
 
-import { message_action } from "./messaging/message_actions";
+import { message_action, runTadokuDayResetAutoPush } from "./messaging/message_actions";
 import {
   connectionClosed,
   connectionOpened,
@@ -71,9 +71,35 @@ const setupContextMenus = async () => {
   }
 };
 
+const setupTadokuAlarms = async () => {
+  try {
+    if (!browser.alarms) return;
+    await browser.alarms.clear("tadoku_day_check");
+    browser.alarms.create("tadoku_day_check", { periodInMinutes: 15 });
+  } catch (e) {
+    console.error("Failed to setup alarms:", e);
+  }
+};
+
+if (browser.alarms && browser.alarms.onAlarm) {
+  browser.alarms.onAlarm.addListener(async (alarm) => {
+    if (alarm.name === "tadoku_day_check") {
+      await runTadokuDayResetAutoPush().catch(() => {});
+    }
+  });
+}
+
+if (browser.runtime.onStartup) {
+  browser.runtime.onStartup.addListener(async () => {
+    await runTadokuDayResetAutoPush().catch(() => {});
+  });
+}
+
 browser.runtime.onUpdateAvailable.addListener(() => browser.runtime.reload());
 browser.runtime.onInstalled.addListener(async () => {
   setupContextMenus();
+  setupTadokuAlarms();
+  runTadokuDayResetAutoPush().catch(() => {});
 
   if (!(await browser.storage.local.get("client"))["client"])
     await browser.storage.local.set({ client: crypto.randomUUID() });
@@ -90,6 +116,8 @@ browser.runtime.onInstalled.addListener(async () => {
 });
 
 setupContextMenus();
+setupTadokuAlarms();
+runTadokuDayResetAutoPush().catch(() => {});
 
 browser.contextMenus.onClicked.addListener(async (info) => {
   const urlMap: Record<string, string> = {

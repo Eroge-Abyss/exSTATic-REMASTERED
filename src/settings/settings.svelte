@@ -18,6 +18,74 @@
   let showTexthookerWs = $state(true);
   let showTadokuWs = $state(true);
   let muramasaLogging = $state(false);
+  let tadokuLogging = $state(false);
+  let tadokuAutoJoinContest = $state(true);
+  let tadokuManualLogging = $state(false);
+  let tadokuAuthStatus = $state<{
+    checked: boolean;
+    loggedIn: boolean;
+    displayName?: string;
+    role?: string;
+  }>({
+    checked: false,
+    loggedIn: false,
+  });
+
+  const checkTadokuStatus = async () => {
+    try {
+      const res = await browser.runtime.sendMessage({ action: "tadoku_status" });
+      if (res && res.loggedIn) {
+        tadokuAuthStatus = {
+          checked: true,
+          loggedIn: true,
+          displayName: res.user?.displayName || "Tadoku User",
+          role: res.role,
+        };
+      } else {
+        tadokuAuthStatus = {
+          checked: true,
+          loggedIn: false,
+        };
+      }
+    } catch {
+      tadokuAuthStatus = {
+        checked: true,
+        loggedIn: false,
+      };
+    }
+  };
+
+  const toggleTadokuLogging = async () => {
+    tadokuLogging = !tadokuLogging;
+    await browser.storage.local.set({
+      tadoku_logging: tadokuLogging,
+    });
+    if (tadokuLogging) {
+      checkTadokuStatus();
+    }
+  };
+
+  const toggleTadokuAutoJoin = async () => {
+    tadokuAutoJoinContest = !tadokuAutoJoinContest;
+    await browser.storage.local.set({
+      tadoku_auto_join_contest: tadokuAutoJoinContest,
+    });
+  };
+
+  const toggleTadokuManualLogging = async () => {
+    tadokuManualLogging = !tadokuManualLogging;
+    await browser.storage.local.set({
+      tadoku_manual_logging: tadokuManualLogging,
+    });
+  };
+
+  const openTadokuLogin = async () => {
+    await browser.runtime.sendMessage({
+      action: "open_tab",
+      url: "https://tadoku.app",
+    });
+  };
+
   let currentTheme = $state<ThemeId>("dark");
   let selectedTheme = $derived(themeList.find((t) => t.id === currentTheme));
   let isThemeDropdownOpen = $state(false);
@@ -37,6 +105,9 @@
       "show_tadoku_ws",
       "show_websocket_icons",
       "muramasa_logging",
+      "tadoku_logging",
+      "tadoku_auto_join_contest",
+      "tadoku_manual_logging",
     ]);
     disableAnimations = !!data.disable_animations;
     showTexthookerWs =
@@ -48,6 +119,12 @@
         ? !!data.show_tadoku_ws
         : (data.show_websocket_icons !== undefined ? !!data.show_websocket_icons : true);
     muramasaLogging = !!data.muramasa_logging;
+    tadokuLogging = !!data.tadoku_logging;
+    tadokuAutoJoinContest = data.tadoku_auto_join_contest !== false;
+    tadokuManualLogging = !!data.tadoku_manual_logging;
+    if (tadokuLogging) {
+      checkTadokuStatus();
+    }
     window.addEventListener("click", handleClickOutside);
     return () => {
       window.removeEventListener("click", handleClickOutside);
@@ -274,6 +351,73 @@
         {muramasaLogging ? "ON (Enabled)" : "OFF (Disabled)"}
       </button>
     </SettingRow>
+    <SettingRow label="Tadoku.app Integration">
+      <button
+        type="button"
+        class="rounded-lg px-6 py-2 font-medium transition-colors cursor-pointer {tadokuLogging
+          ? 'bg-button text-white hover:bg-hover'
+          : 'bg-backdrop text-text hover:opacity-80'}"
+        onclick={toggleTadokuLogging}
+      >
+        {tadokuLogging ? "ON (Enabled)" : "OFF (Disabled)"}
+      </button>
+    </SettingRow>
+    {#if tadokuLogging}
+      <SettingRow label="Tadoku Connection">
+        <div class="flex items-center gap-2">
+          {#if !tadokuAuthStatus.checked}
+            <span class="text-xs text-muted">Checking connection...</span>
+          {:else if tadokuAuthStatus.loggedIn}
+            <span class="inline-flex items-center gap-1.5 text-xs text-emerald-400 font-medium">
+              <span class="h-2 w-2 rounded-full bg-emerald-400"></span>
+              Logged in as {tadokuAuthStatus.displayName}
+            </span>
+          {:else}
+            <span class="inline-flex items-center gap-1.5 text-xs text-amber-400 font-medium">
+              <span class="h-2 w-2 rounded-full bg-amber-400"></span>
+              Not logged in
+            </span>
+            <button
+              type="button"
+              class="text-xs text-accent underline hover:opacity-80 cursor-pointer ml-1"
+              onclick={openTadokuLogin}
+            >
+              Log in to Tadoku
+            </button>
+          {/if}
+          <button
+            type="button"
+            class="text-xs text-muted hover:text-text cursor-pointer ml-1 px-1.5 py-0.5 rounded bg-surface hover:bg-hover transition-colors"
+            title="Refresh status"
+            onclick={checkTadokuStatus}
+          >
+            ↻
+          </button>
+        </div>
+      </SettingRow>
+      <SettingRow label="Auto-join Official Contests">
+        <button
+          type="button"
+          class="rounded-lg px-6 py-2 font-medium transition-colors cursor-pointer {tadokuAutoJoinContest
+            ? 'bg-button text-white hover:bg-hover'
+            : 'bg-backdrop text-text hover:opacity-80'}"
+          onclick={toggleTadokuAutoJoin}
+        >
+          {tadokuAutoJoinContest ? "ON (Enabled)" : "OFF (Disabled)"}
+        </button>
+      </SettingRow>
+      <SettingRow label="Manual Logging">
+        <button
+          type="button"
+          class="rounded-lg px-6 py-2 font-medium transition-colors cursor-pointer {tadokuManualLogging
+            ? 'bg-button text-white hover:bg-hover'
+            : 'bg-backdrop text-text hover:opacity-80'}"
+          onclick={toggleTadokuManualLogging}
+        >
+          {tadokuManualLogging ? "ON (Enabled)" : "OFF (Disabled)"}
+        </button>
+      </SettingRow>
+    {/if}
   {:else if type === "mokuro"}
     <MenuOption
       media_storage={mokuro_storage}
