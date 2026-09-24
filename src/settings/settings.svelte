@@ -10,7 +10,7 @@
   import { applyTheme, setTheme } from "../themes/apply_theme";
   import { themeList, type ThemeId } from "../themes/themes";
   import { exportLines, exportStats } from "../data_wrangling/data_export";
-  import { importLines, importStats, revertLastImport } from "../data_wrangling/data_import";
+  import { importLines, importStats, revertLastImport, type ImportStatsMode } from "../data_wrangling/data_import";
   import type { DataEntry } from "../data_wrangling/data_extraction";
   import { parse } from "papaparse";
 
@@ -252,31 +252,58 @@
     }
   };
 
+  let pendingStatsImportData = $state<DataEntry[] | null>(null);
+  let pendingStatsFileName = $state("");
+  let selectedImportMode = $state<ImportStatsMode>("smart");
+  let showImportStatsModal = $state(false);
+  let isImporting = $state(false);
+
   const requestImportStats = (event: Event) => {
     const file = (event.target as HTMLInputElement).files?.[0];
     if (!file) return;
 
-    const confirmed = confirm(
-      "Are you sure you'd like to import stats?\nThe imported stats will replace conflicting entries (i.e. on the same days for the same media)...\nIt is highly recommended to BACKUP (export) data regularly in case anything goes wrong (i.e. before importing)!",
-    );
-
-    if (!confirmed) {
-      (event.target as HTMLInputElement).value = "";
-      return;
-    }
-
     parse(file, {
       header: true,
       dynamicTyping: true,
-      complete: async (result) => {
-        await importStats(result.data as DataEntry[]);
-        await checkRevertImportStatus();
-        alert(
-          "Finished importing stats successfully!\nPlease refresh all exSTATic pages now...",
+      complete: (result) => {
+        const valid = (result.data as DataEntry[]).filter(
+          (e) => e && e.type && e.date && e.given_identifier,
         );
+        if (valid.length === 0) {
+          alert("No valid reading records found in this CSV file.");
+          (event.target as HTMLInputElement).value = "";
+          return;
+        }
+        pendingStatsImportData = valid;
+        pendingStatsFileName = file.name;
+        selectedImportMode = "smart";
+        showImportStatsModal = true;
         (event.target as HTMLInputElement).value = "";
       },
     });
+  };
+
+  const confirmExecuteImportStats = async () => {
+    if (!pendingStatsImportData) return;
+    isImporting = true;
+    try {
+      await importStats(pendingStatsImportData, selectedImportMode);
+      await checkRevertImportStatus();
+      showImportStatsModal = false;
+      const modeLabels: Record<ImportStatsMode, string> = {
+        smart: "Smart Delta Merge",
+        replace: "Overwrite",
+        sum: "Cumulative Sum",
+      };
+      alert(
+        `Finished importing stats successfully!\nStrategy: ${modeLabels[selectedImportMode]}\nPlease refresh all exSTATic pages now...`,
+      );
+    } catch (e: any) {
+      alert(`Import failed: ${e?.message || e}`);
+    } finally {
+      isImporting = false;
+      pendingStatsImportData = null;
+    }
   };
 
   const requestImportLines = (event: Event) => {
@@ -822,6 +849,142 @@
       </section>
     {/if}
   </main>
+
+  {#if showImportStatsModal}
+    <!-- svelte-ignore a11y_click_events_have_key_events -->
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div
+      class="fixed inset-0 z-50 flex items-center justify-center bg-black/65 backdrop-blur-sm p-4"
+      onclick={() => (showImportStatsModal = false)}
+    >
+      <div
+        class="relative w-full max-w-lg rounded-2xl border border-white/[0.08] bg-block p-6 shadow-2xl flex flex-col gap-5 text-left"
+        onclick={(e) => e.stopPropagation()}
+      >
+        <div class="flex items-center justify-between border-b border-white/[0.06] pb-3">
+          <div>
+            <h3 class="text-base font-bold text-white tracking-wide">Import Statistics</h3>
+            <p class="text-xs text-muted mt-0.5 font-mono truncate max-w-sm">
+              {pendingStatsFileName} &bull; {pendingStatsImportData?.length ?? 0} entries
+            </p>
+          </div>
+          <button
+            type="button"
+            class="text-muted hover:text-white transition-colors cursor-pointer text-sm p-1"
+            onclick={() => (showImportStatsModal = false)}
+          >
+            ✕
+          </button>
+        </div>
+
+        <div class="flex flex-col gap-2.5">
+          <span class="text-xs font-semibold uppercase tracking-wider text-muted">
+            Choose Import Strategy
+          </span>
+
+          <!-- Option 1: Smart Merge -->
+          <!-- svelte-ignore a11y_click_events_have_key_events -->
+          <!-- svelte-ignore a11y_no_static_element_interactions -->
+          <div
+            class="flex items-start gap-3 p-3.5 rounded-xl border transition-all cursor-pointer {selectedImportMode === 'smart'
+              ? 'bg-surface border-accent'
+              : 'bg-surface/50 border-white/[0.06] hover:border-white/[0.15]'}"
+            onclick={() => (selectedImportMode = 'smart')}
+          >
+            <input
+              type="radio"
+              name="import_mode"
+              value="smart"
+              checked={selectedImportMode === 'smart'}
+              class="mt-1 text-accent focus:ring-0 cursor-pointer"
+            />
+            <div class="flex flex-col gap-1">
+              <div class="flex items-center gap-2">
+                <span class="text-sm font-semibold text-strong">Smart Merge (Add Difference)</span>
+                <span class="rounded bg-accent/20 px-1.5 py-0.5 text-[10px] font-bold text-accent uppercase">
+                  Recommended
+                </span>
+              </div>
+              <p class="text-xs text-muted leading-relaxed">
+                Adds only the positive difference (<code class="text-xs">max(current, imported)</code>). If the same file is imported again, <strong>nothing is doubled</strong>. Protects against outdated backups wiping newer stats.
+              </p>
+            </div>
+          </div>
+
+          <!-- Option 2: Overwrite / Replace -->
+          <!-- svelte-ignore a11y_click_events_have_key_events -->
+          <!-- svelte-ignore a11y_no_static_element_interactions -->
+          <div
+            class="flex items-start gap-3 p-3.5 rounded-xl border transition-all cursor-pointer {selectedImportMode === 'replace'
+              ? 'bg-surface border-accent'
+              : 'bg-surface/50 border-white/[0.06] hover:border-white/[0.15]'}"
+            onclick={() => (selectedImportMode = 'replace')}
+          >
+            <input
+              type="radio"
+              name="import_mode"
+              value="replace"
+              checked={selectedImportMode === 'replace'}
+              class="mt-1 text-accent focus:ring-0 cursor-pointer"
+            />
+            <div class="flex flex-col gap-1">
+              <span class="text-sm font-semibold text-strong">Replace / Overwrite</span>
+              <p class="text-xs text-muted leading-relaxed">
+                Replaces matching days with the file's values. Best for restoring a full authoritative backup or correcting errors.
+              </p>
+            </div>
+          </div>
+
+          <!-- Option 3: Cumulative Sum -->
+          <!-- svelte-ignore a11y_click_events_have_key_events -->
+          <!-- svelte-ignore a11y_no_static_element_interactions -->
+          <div
+            class="flex items-start gap-3 p-3.5 rounded-xl border transition-all cursor-pointer {selectedImportMode === 'sum'
+              ? 'bg-surface border-accent'
+              : 'bg-surface/50 border-white/[0.06] hover:border-white/[0.15]'}"
+            onclick={() => (selectedImportMode = 'sum')}
+          >
+            <input
+              type="radio"
+              name="import_mode"
+              value="sum"
+              checked={selectedImportMode === 'sum'}
+              class="mt-1 text-accent focus:ring-0 cursor-pointer"
+            />
+            <div class="flex flex-col gap-1">
+              <span class="text-sm font-semibold text-strong">Cumulative Sum (Add Together)</span>
+              <p class="text-xs text-muted leading-relaxed">
+                Adds imported character and time counts on top of existing days (<code class="text-xs">current + imported</code>). Use when combining independent offline sessions.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div class="flex items-center justify-end gap-3 pt-2 border-t border-white/[0.06]">
+          <button
+            type="button"
+            class="px-4 py-2 text-xs font-semibold text-muted hover:text-white transition-colors cursor-pointer"
+            onclick={() => (showImportStatsModal = false)}
+            disabled={isImporting}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            class="inline-flex items-center gap-2 rounded-lg bg-button px-5 py-2 text-xs font-semibold text-white shadow-sm hover:bg-hover transition-colors cursor-pointer disabled:opacity-50"
+            onclick={confirmExecuteImportStats}
+            disabled={isImporting}
+          >
+            {#if isImporting}
+              <span>Importing...</span>
+            {:else}
+              <span>Confirm Import</span>
+            {/if}
+          </button>
+        </div>
+      </div>
+    </div>
+  {/if}
 </div>
 
 <style global lang="postcss">

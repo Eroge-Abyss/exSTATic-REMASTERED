@@ -12,7 +12,9 @@ async function batchSet(items: Record<string, unknown>, chunkSize = 500) {
   }
 }
 
-export async function importStats(data: DataEntry[]) {
+export type ImportStatsMode = "smart" | "replace" | "sum";
+
+export async function importStats(data: DataEntry[], mode: ImportStatsMode = "smart") {
   if (!Array.isArray(data) || data.length === 0) return;
 
   const validEntries = data.filter(
@@ -74,11 +76,17 @@ export async function importStats(data: DataEntry[]) {
     allUuids.add(uuid);
   }
 
-  // 3. Batch read existing UUID details, date arrays, and type properties
+  // 3. Batch read existing UUID details, date arrays, type properties, and existing stats
   const uniqueDates = [
     ...new Set(validEntries.map((e) => String(e["date"]))),
   ];
-  const keysToFetch = [...allUuids, ...uniqueDates, ...uniqueTypes];
+  const allStatKeys = validEntries.map((e) => {
+    const client = (e["client"] as string) || defaultClient;
+    const uuid = entryUuids.get(e)!;
+    const date = String(e["date"]);
+    return JSON.stringify([client, uuid, date]);
+  });
+  const keysToFetch = [...allUuids, ...uniqueDates, ...uniqueTypes, ...allStatKeys];
   const preloaded = await browser.storage.local.get(keysToFetch);
 
   // 4. In-memory updates for types, details, dates, and stats
@@ -144,28 +152,48 @@ export async function importStats(data: DataEntry[]) {
       dayEntries.push([client, uuid]);
     }
 
-    // Daily stats
-    const stats: Stat = { chars_read: 0, time_read: 0 };
-    if (
-      entry.hasOwnProperty("chars_read") &&
-      entry["chars_read"] !== undefined
-    ) {
-      stats.chars_read = Number(entry["chars_read"]) || 0;
+    // Daily stats calculation according to selected mode
+    let chars = 0;
+    if (entry.hasOwnProperty("chars_read") && entry["chars_read"] !== undefined) {
+      chars = Number(entry["chars_read"]) || 0;
     }
-    if (
-      entry.hasOwnProperty("lines_read") &&
-      entry["lines_read"] !== undefined
-    ) {
-      stats.lines_read = Number(entry["lines_read"]) || 0;
+    let lines: number | undefined = undefined;
+    if (entry.hasOwnProperty("lines_read") && entry["lines_read"] !== undefined) {
+      lines = Number(entry["lines_read"]) || 0;
     }
-    if (
-      entry.hasOwnProperty("time_read") &&
-      entry["time_read"] !== undefined
-    ) {
-      stats.time_read = Number(entry["time_read"]) || 0;
+    let time = 0;
+    if (entry.hasOwnProperty("time_read") && entry["time_read"] !== undefined) {
+      time = Number(entry["time_read"]) || 0;
     }
 
     const statKey = JSON.stringify([client, uuid, date]);
+    const existing = preloaded[statKey] as Stat | undefined;
+
+    if (existing) {
+      if (mode === "smart") {
+        // Smart Merge: Only add positive difference / take higher of each metric
+        chars = Math.max(existing.chars_read || 0, chars);
+        if (lines !== undefined || existing.lines_read !== undefined) {
+          lines = Math.max(existing.lines_read || 0, lines || 0);
+        }
+        time = Math.max(existing.time_read || 0, time);
+      } else if (mode === "sum") {
+        // Cumulative Sum: Add imported values directly to existing
+        chars = (existing.chars_read || 0) + chars;
+        if (lines !== undefined || existing.lines_read !== undefined) {
+          lines = (existing.lines_read || 0) + (lines || 0);
+        }
+        time = (existing.time_read || 0) + time;
+      }
+      // "replace" mode keeps the imported values directly
+    }
+
+    const stats: Stat = {
+      chars_read: chars,
+      time_read: time,
+      ...(lines !== undefined ? { lines_read: lines } : {}),
+    };
+
     dailyStatsToWrite[statKey] = stats;
   }
 
