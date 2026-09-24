@@ -410,7 +410,6 @@
     font-size: 1.3rem;
     font-weight: 700;
     color: var(--exs-title, #818cf8);
-    text-shadow: 0 0 12px rgba(129, 140, 248, 0.2);
     margin: 0;
   }
   .sp-subtitle {
@@ -452,7 +451,6 @@
     background: var(--exs-accent, #818cf8) !important;
     color: var(--exs-accent-text, #ffffff) !important;
     font-weight: 500 !important;
-    box-shadow: 0 0 16px rgba(129, 140, 248, 0.4) !important;
   }
   .sp-figure {
     position: relative;
@@ -491,6 +489,5 @@
     background: var(--exs-accent, #818cf8) !important;
     color: var(--exs-accent-text, #ffffff) !important;
     font-weight: 500 !important;
-    box-shadow: 0 0 16px rgba(129, 140, 248, 0.4) !important;
   }
 </style>
