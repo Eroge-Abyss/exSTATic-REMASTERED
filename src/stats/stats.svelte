@@ -47,18 +47,12 @@
     renameGame,
     setGameVndbId,
     setGameTadokuAutoLog,
-    getDuplicateGroups,
-    mergeGames,
-    mergeGameGroup,
-    undoMerge,
-    getMergeHistory,
     upsertManualStat,
     restoreManualStats,
     createManualTitle,
     repairDateStats,
     type DataEntry,
     type StatSnapshot,
-    type MergeSnapshot,
   } from "../data_wrangling/data_extraction";
   import type {
     TooltipAccessors,
@@ -164,92 +158,6 @@
     }
   }
   loadAllInstances();
-
-  // Duplicate detection
-  let duplicateGroups = $state<{ name: string; uuids: string[] }[]>([]);
-  let showDuplicates = $state(false);
-  let mergingGroup = $state<string | null>(null);
-
-  async function loadDuplicates() {
-    duplicateGroups = await getDuplicateGroups();
-  }
-  loadDuplicates();
-
-  async function handleMerge(group: { name: string; uuids: string[] }) {
-    const confirmed = confirm(
-      `Merge all ${group.uuids.length} entries for "${group.name}" into one?\nThis combines stats and lines. Use the Merge History panel to undo if needed.`
-    );
-    if (!confirmed) return;
-    mergingGroup = group.name;
-
-    // Smart primary selection: inspect candidates to keep the richest/active game as primary
-    const candidateScores: { uuid: string; score: number }[] = [];
-    for (const uuid of group.uuids) {
-      const detailsRaw = await browser.storage.local.get(uuid);
-      const details = detailsRaw[uuid] ?? {};
-      let score = 0;
-      // Prefer tracked media types (vn, mokuro, ttu) over manual entries
-      if (details.type && details.type !== "manual") score += 100000;
-      // Prefer games with recorded lines
-      if (details.last_line_added && details.last_line_added > 0) {
-        score += details.last_line_added;
-      }
-      // Prefer games with more tracked characters in data
-      const charsForUuid = sum(data.filter((d) => d.uuid === uuid), (d) => d.chars_read || 0);
-      score += charsForUuid;
-
-      candidateScores.push({ uuid, score });
-    }
-
-    candidateScores.sort((a, b) => b.score - a.score);
-    const sortedUuids = candidateScores.map((c) => c.uuid);
-    const [primary, ...rest] = sortedUuids;
-
-    try {
-      await mergeGameGroup(primary, rest);
-      await refreshData();
-      await loadDuplicates();
-      await loadMergeHistory();
-    } catch (err: any) {
-      console.error("Merge error:", err);
-      alert(`Failed to merge games: ${err?.message || err}`);
-    } finally {
-      mergingGroup = null;
-    }
-  }
-
-  // ---- Merge History / Undo ----
-  let mergeHistory = $state<MergeSnapshot[]>([]);
-  let undoingMerge = $state<string | null>(null);
-
-  async function loadMergeHistory() {
-    mergeHistory = await getMergeHistory();
-  }
-  loadMergeHistory();
-
-  async function handleUndoMerge(snapshot: MergeSnapshot) {
-    const secNames =
-      snapshot.secondaries && snapshot.secondaries.length > 0
-        ? snapshot.secondaries.map((s) => s.secondaryName).join(", ")
-        : snapshot.secondaryName;
-
-    const confirmed = confirm(
-      `Undo merge of "${secNames}" into "${snapshot.primaryName}"?\nThis will restore all games to their pre-merge state.`
-    );
-    if (!confirmed) return;
-    undoingMerge = snapshot.timestamp;
-    try {
-      await undoMerge(snapshot);
-      await refreshData();
-      await loadDuplicates();
-      await loadMergeHistory();
-    } catch (err: any) {
-      console.error("Undo merge error:", err);
-      alert(`Failed to undo merge: ${err?.message || err}`);
-    } finally {
-      undoingMerge = null;
-    }
-  }
 
   // ---- Period Tab Definitions & State ----
   const PERIODS = ["Week", "Month", "Year", "All Time"] as const;
@@ -964,7 +872,6 @@
   // ---- Game Management ----
   let showGamePanel = $state(false);
   let showDeletedGames = $state(false);
-  let showMergeHistory = $state(false);
   let confirmDeleteUuid = $state<string | null>(null);
   let confirmPermanentDeleteUuid = $state<string | null>(null);
 
@@ -1243,24 +1150,42 @@
     ).filter((d) => mediaType === "all" || d.type === mediaType),
   );
 
-  // Get unique games with their UUIDs (for the management panel).
+  // Get all unique game instances by UUID for the management panel.
   // Only shows entries in the current year, or all of them if it's All Time.
   let uniqueGames = $derived(
     Array.from(
       new Map(
         yearMediaData.map((d) => [
-          (d.name ?? "Unknown").trim(),
-          { uuid: d.uuid, name: (d.name ?? "Unknown").trim(), type: d.type },
+          d.uuid,
+          {
+            uuid: d.uuid,
+            name: (d.name ?? "Unknown").trim(),
+            type: d.type,
+            given_identifier: d.given_identifier,
+          },
         ]),
       ).values(),
     ).sort((a, b) => (a.name ?? "").localeCompare(b.name ?? "")),
   );
 
+  let duplicateTitleCounts = $derived.by(() => {
+    const counts: Record<string, number> = {};
+    for (const g of uniqueGames) {
+      const key = (g.name ?? "").toLowerCase();
+      counts[key] = (counts[key] ?? 0) + 1;
+    }
+    return counts;
+  });
+
   let gameSearchQuery = $state("");
   let displayedGames = $derived.by(() => {
     const q = gameSearchQuery.trim().toLowerCase();
     if (!q) return uniqueGames;
-    return uniqueGames.filter((g) => (g.name ?? "").toLowerCase().includes(q));
+    return uniqueGames.filter(
+      (g) =>
+        (g.name ?? "").toLowerCase().includes(q) ||
+        (g.uuid ?? "").toLowerCase().includes(q),
+    );
   });
 
   // Get all unique game names visible in the current year/All Time + media filter.
@@ -3004,6 +2929,14 @@
               {:else}
                 <span class="truncate text-sm font-medium text-strong">{game.name}</span>
                 <span class="type-badge">{game.type}</span>
+                {#if duplicateTitleCounts[(game.name ?? "").toLowerCase()] > 1}
+                  <span
+                    class="font-mono text-[10px] text-muted-dim bg-surface-2 px-1.5 py-0.5 rounded border border-dim shrink-0 select-all"
+                    title="UUID: {game.uuid}"
+                  >
+                    {game.uuid.slice(0, 8)}…
+                  </span>
+                {/if}
                 {#if (muramasaLogging || tadokuLogging) && (game.type === "vn" || !game.type)}
                   {#if editingVndbUuid === game.uuid}
                     <div class="flex items-center gap-1 ml-1">
@@ -3393,96 +3326,6 @@
         </div>
       {/if}
 
-      <!-- Merge Duplicates -->
-      {#if duplicateGroups.length > 0}
-        <div class="mt-4 border-t border-dim pt-4">
-          <button
-            class="flex items-center gap-2 text-sm font-semibold text-amber-400/90 hover:text-amber-300 transition-colors cursor-pointer"
-            onclick={() => (showDuplicates = !showDuplicates)}
-          >
-            <svg class="h-3.5 w-3.5 transition-transform duration-200 {showDuplicates ? 'rotate-90 text-amber-400' : ''}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-              <polyline points="9 18 15 12 9 6"></polyline>
-            </svg>
-            <span>Duplicate Titles</span>
-            <span class="count-badge-amber">{duplicateGroups.length}</span>
-          </button>
-
-          {#if showDuplicates}
-            <div class="mt-3 space-y-1.5">
-              {#each duplicateGroups as group}
-                <div class="game-row items-center">
-                  <div class="flex min-w-0 flex-1 items-center gap-2">
-                    <span class="truncate text-sm font-medium text-amber-300">{group.name}</span>
-                    <span class="type-badge">{group.uuids.length} entries</span>
-                  </div>
-                  <button
-                    class="btn-sm btn-primary shrink-0"
-                    disabled={mergingGroup === group.name}
-                    onclick={() => handleMerge(group)}
-                  >
-                    <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-                      <circle cx="18" cy="18" r="3"></circle>
-                      <circle cx="6" cy="6" r="3"></circle>
-                      <path d="M6 21V9a9 9 0 0 0 9 9"></path>
-                    </svg>
-                    <span>{mergingGroup === group.name ? "Merging…" : "Merge"}</span>
-                  </button>
-                </div>
-              {/each}
-            </div>
-          {/if}
-        </div>
-      {/if}
-
-      <!-- Merge History -->
-      {#if mergeHistory.length > 0}
-        <div class="mt-4 border-t border-dim pt-4">
-          <button
-            class="flex items-center gap-2 text-sm font-semibold text-muted hover:text-strong transition-colors cursor-pointer"
-            onclick={() => (showMergeHistory = !showMergeHistory)}
-          >
-            <svg class="h-3.5 w-3.5 transition-transform duration-200 {showMergeHistory ? 'rotate-90 text-accent' : ''}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-              <polyline points="9 18 15 12 9 6"></polyline>
-            </svg>
-            <span>Merge History</span>
-            <span class="count-badge">{mergeHistory.length}</span>
-          </button>
-
-          {#if showMergeHistory}
-            <div class="mt-3 space-y-1.5">
-              {#each mergeHistory as snap}
-                <div class="game-row items-center">
-                  <div class="flex min-w-0 flex-1 flex-col gap-0.5">
-                    <span class="truncate text-sm text-strong">
-                      <span class="text-accent">
-                        {snap.secondaries && snap.secondaries.length > 0
-                          ? snap.secondaries.map((s) => s.secondaryName).join(", ")
-                          : snap.secondaryName}
-                      </span>
-                      <span class="text-muted mx-1">→</span>
-                      <span class="text-accent">{snap.primaryName}</span>
-                    </span>
-                    <span class="text-[10px] text-muted">
-                      {new Date(snap.timestamp).toLocaleString()}
-                    </span>
-                  </div>
-                  <button
-                    class="btn-sm btn-restore shrink-0"
-                    disabled={undoingMerge === snap.timestamp}
-                    onclick={() => handleUndoMerge(snap)}
-                  >
-                    <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-                      <polyline points="1 4 1 10 7 10"></polyline>
-                      <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path>
-                    </svg>
-                    <span>{undoingMerge === snap.timestamp ? "Restoring…" : "Undo"}</span>
-                  </button>
-                </div>
-              {/each}
-            </div>
-          {/if}
-        </div>
-      {/if}
     </div>
   {/if}
 
