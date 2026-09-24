@@ -49,6 +49,7 @@
     setGameTadokuAutoLog,
     getDuplicateGroups,
     mergeGames,
+    mergeGameGroup,
     undoMerge,
     getMergeHistory,
     upsertManualStat,
@@ -204,13 +205,17 @@
     const sortedUuids = candidateScores.map((c) => c.uuid);
     const [primary, ...rest] = sortedUuids;
 
-    for (const secondary of rest) {
-      await mergeGames(primary, secondary);
+    try {
+      await mergeGameGroup(primary, rest);
+      await refreshData();
+      await loadDuplicates();
+      await loadMergeHistory();
+    } catch (err: any) {
+      console.error("Merge error:", err);
+      alert(`Failed to merge games: ${err?.message || err}`);
+    } finally {
+      mergingGroup = null;
     }
-    mergingGroup = null;
-    await refreshData();
-    await loadDuplicates();
-    await loadMergeHistory();
   }
 
   // ---- Merge History / Undo ----
@@ -223,16 +228,27 @@
   loadMergeHistory();
 
   async function handleUndoMerge(snapshot: MergeSnapshot) {
+    const secNames =
+      snapshot.secondaries && snapshot.secondaries.length > 0
+        ? snapshot.secondaries.map((s) => s.secondaryName).join(", ")
+        : snapshot.secondaryName;
+
     const confirmed = confirm(
-      `Undo merge of "${snapshot.secondaryName}" into "${snapshot.primaryName}"?\nThis will restore both games to their pre-merge state.`
+      `Undo merge of "${secNames}" into "${snapshot.primaryName}"?\nThis will restore all games to their pre-merge state.`
     );
     if (!confirmed) return;
     undoingMerge = snapshot.timestamp;
-    await undoMerge(snapshot);
-    undoingMerge = null;
-    await refreshData();
-    await loadDuplicates();
-    await loadMergeHistory();
+    try {
+      await undoMerge(snapshot);
+      await refreshData();
+      await loadDuplicates();
+      await loadMergeHistory();
+    } catch (err: any) {
+      console.error("Undo merge error:", err);
+      alert(`Failed to undo merge: ${err?.message || err}`);
+    } finally {
+      undoingMerge = null;
+    }
   }
 
   // ---- Period Tab Definitions & State ----
@@ -1004,14 +1020,24 @@
   });
 
   async function handleSoftDelete(uuid: string) {
-    await softDeleteGame(uuid);
-    confirmDeleteUuid = null;
-    await refreshData();
+    try {
+      await softDeleteGame(uuid);
+      confirmDeleteUuid = null;
+      await refreshData();
+    } catch (err: any) {
+      console.error("Soft delete error:", err);
+      alert(`Failed to delete game: ${err?.message || err}`);
+    }
   }
 
   async function handleRestore(uuid: string) {
-    await restoreGame(uuid);
-    await refreshData();
+    try {
+      await restoreGame(uuid);
+      await refreshData();
+    } catch (err: any) {
+      console.error("Restore game error:", err);
+      alert(`Failed to restore game: ${err?.message || err}`);
+    }
   }
 
   async function handlePermanentDelete(uuid: string) {
@@ -3428,7 +3454,11 @@
                 <div class="game-row items-center">
                   <div class="flex min-w-0 flex-1 flex-col gap-0.5">
                     <span class="truncate text-sm text-strong">
-                      <span class="text-accent">{snap.secondaryName}</span>
+                      <span class="text-accent">
+                        {snap.secondaries && snap.secondaries.length > 0
+                          ? snap.secondaries.map((s) => s.secondaryName).join(", ")
+                          : snap.secondaryName}
+                      </span>
                       <span class="text-muted mx-1">→</span>
                       <span class="text-accent">{snap.primaryName}</span>
                     </span>

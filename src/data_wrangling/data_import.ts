@@ -66,11 +66,10 @@ export async function importStats(data: DataEntry[], mode: ImportStatsMode = "sm
     const givenIdentifier = String(entry["given_identifier"]);
     const mediaKey = JSON.stringify([givenIdentifier, type]);
 
-    let uuid = mediaMap[mediaKey];
-    if (!uuid) {
-      uuid = (entry["uuid"] as string) || crypto.randomUUID();
-      mediaMap[mediaKey] = uuid;
-    }
+    const entryExplicitUuid =
+      typeof entry["uuid"] === "string" ? entry["uuid"].trim() : "";
+    let uuid = entryExplicitUuid || mediaMap[mediaKey] || crypto.randomUUID();
+    mediaMap[mediaKey] = uuid;
 
     entryUuids.set(entry, uuid);
     allUuids.add(uuid);
