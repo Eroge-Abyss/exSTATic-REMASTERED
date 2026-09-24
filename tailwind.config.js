@@ -16,7 +16,14 @@ module.exports = {
           menu: "var(--exs-menu-bg)",
           "menu-text": "var(--exs-menu-text)",
           button: "var(--exs-accent)",
-          hover: "var(--exs-accent-hover)"
+          hover: "var(--exs-accent-hover)",
+          dim: "var(--exs-border-dim, rgba(255, 255, 255, 0.08))",
+          border: "var(--exs-border, rgba(255, 255, 255, 0.1))"
+        },
+        borderColor: {
+          DEFAULT: "var(--exs-border, rgba(255, 255, 255, 0.08))",
+          dim: "var(--exs-border-dim, rgba(255, 255, 255, 0.06))",
+          border: "var(--exs-border, rgba(255, 255, 255, 0.1))"
         }
       }
     },

@@ -299,11 +299,11 @@
   <!-- Top Navigation Bar -->
   <header
     id="top_bar"
-    class="sticky top-0 z-40 w-full border-b border-dim/60 bg-backdrop/85 backdrop-blur-md px-6 py-4"
+    class="sticky top-0 z-40 w-full border-b border-white/[0.06] bg-backdrop/85 backdrop-blur-md px-6 py-4"
   >
     <div class="max-w-4xl mx-auto flex flex-col items-center gap-3">
       <h1 class="header-text text-2xl font-bold tracking-tight">Settings</h1>
-      <nav class="flex items-center gap-1 rounded-xl bg-block p-1 border border-dim shadow-sm">
+      <nav class="flex items-center gap-1 rounded-xl bg-block p-1 border border-white/[0.08] shadow-sm">
         {#each [
           { id: 'global', label: 'Global Dash' },
           { id: 'vn', label: 'Visual Novel' },
@@ -328,8 +328,8 @@
   <main class="max-w-4xl mx-auto px-4 sm:px-6 pt-8 flex flex-col gap-6">
     {#if type === "global"}
       <!-- Appearance & Display Card -->
-      <section class="rounded-xl border border-dim bg-block/70 p-5 sm:p-6 shadow-sm flex flex-col">
-        <div class="pb-3 mb-1 border-b border-dim/60">
+      <section class="rounded-xl border border-white/[0.08] bg-block/70 p-5 sm:p-6 shadow-sm flex flex-col">
+        <div class="pb-3 mb-1 border-b border-white/[0.06]">
           <h2 class="text-sm font-semibold uppercase tracking-wider text-accent">Appearance & Display</h2>
           <p class="text-xs text-muted mt-0.5">Customize the visual theme and animation preferences of exSTATic</p>
         </div>
@@ -453,8 +453,8 @@
       </section>
 
       <!-- Data Management Card -->
-      <section class="rounded-xl border border-dim bg-block/70 p-5 sm:p-6 shadow-sm flex flex-col">
-        <div class="pb-3 mb-1 border-b border-dim/60">
+      <section class="rounded-xl border border-white/[0.08] bg-block/70 p-5 sm:p-6 shadow-sm flex flex-col">
+        <div class="pb-3 mb-1 border-b border-white/[0.06]">
           <h2 class="text-sm font-semibold uppercase tracking-wider text-accent">Data Management</h2>
           <p class="text-xs text-muted mt-0.5">Backup and restore your reading stats and raw dialogue line history</p>
         </div>
@@ -531,8 +531,8 @@
       </section>
     {:else if type === "vn"}
       <!-- Integrations & Auto-Sync Card -->
-      <section class="rounded-xl border border-dim bg-block/70 p-5 sm:p-6 shadow-sm flex flex-col">
-        <div class="pb-3 mb-1 border-b border-dim/60">
+      <section class="rounded-xl border border-white/[0.08] bg-block/70 p-5 sm:p-6 shadow-sm flex flex-col">
+        <div class="pb-3 mb-1 border-b border-white/[0.06]">
           <h2 class="text-sm font-semibold uppercase tracking-wider text-accent">Integrations & Auto-Sync</h2>
           <p class="text-xs text-muted mt-0.5">Connect external tracking platforms and automated reading logs</p>
         </div>
@@ -648,8 +648,8 @@
       </section>
 
       <!-- Reading Tracker & Texthooker Card -->
-      <section class="rounded-xl border border-dim bg-block/70 p-5 sm:p-6 shadow-sm flex flex-col">
-        <div class="pb-3 mb-1 border-b border-dim/60">
+      <section class="rounded-xl border border-white/[0.08] bg-block/70 p-5 sm:p-6 shadow-sm flex flex-col">
+        <div class="pb-3 mb-1 border-b border-white/[0.06]">
           <h2 class="text-sm font-semibold uppercase tracking-wider text-accent">Reading Tracker & Texthooker</h2>
           <p class="text-xs text-muted mt-0.5">Configure dialogue overlay appearance and reading activity detection</p>
         </div>
@@ -731,8 +731,8 @@
       </section>
     {:else if type === "mokuro"}
       <!-- Mokuro Manga Tracker Card -->
-      <section class="rounded-xl border border-dim bg-block/70 p-5 sm:p-6 shadow-sm flex flex-col">
-        <div class="pb-3 mb-1 border-b border-dim/60">
+      <section class="rounded-xl border border-white/[0.08] bg-block/70 p-5 sm:p-6 shadow-sm flex flex-col">
+        <div class="pb-3 mb-1 border-b border-white/[0.06]">
           <h2 class="text-sm font-semibold uppercase tracking-wider text-accent">Mokuro Manga Tracker</h2>
           <p class="text-xs text-muted mt-0.5">Configure tracking behavior for Mokuro web manga reader</p>
         </div>
@@ -749,8 +749,8 @@
       </section>
     {:else if type === "ttu"}
       <!-- TTU Reader Tracker Card -->
-      <section class="rounded-xl border border-dim bg-block/70 p-5 sm:p-6 shadow-sm flex flex-col">
-        <div class="pb-3 mb-1 border-b border-dim/60">
+      <section class="rounded-xl border border-white/[0.08] bg-block/70 p-5 sm:p-6 shadow-sm flex flex-col">
+        <div class="pb-3 mb-1 border-b border-white/[0.06]">
           <h2 class="text-sm font-semibold uppercase tracking-wider text-accent">TTU Reader Tracker</h2>
           <p class="text-xs text-muted mt-0.5">Configure tracking behavior for TTU eBook reader</p>
         </div>
@@ -797,7 +797,7 @@
   }
 
   .border-dim {
-    border-color: var(--exs-border, #334155);
+    border-color: rgba(255, 255, 255, 0.08);
   }
 
   .text-accent {
@@ -808,7 +808,7 @@
     background: color-mix(in srgb, var(--exs-backdrop, #1e293b) 85%, transparent);
     backdrop-filter: blur(12px);
     -webkit-backdrop-filter: blur(12px);
-    border-bottom: 1px solid var(--exs-border, #334155);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
   }
 
   .header-text {
