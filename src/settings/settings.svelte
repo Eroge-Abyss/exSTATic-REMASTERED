@@ -125,9 +125,16 @@
     if (tadokuLogging) {
       checkTadokuStatus();
     }
+    const handleFocus = () => {
+      if (tadokuLogging) {
+        checkTadokuStatus();
+      }
+    };
     window.addEventListener("click", handleClickOutside);
+    window.addEventListener("focus", handleFocus);
     return () => {
       window.removeEventListener("click", handleClickOutside);
+      window.removeEventListener("focus", handleFocus);
     };
   });
 

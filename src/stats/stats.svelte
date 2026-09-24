@@ -126,6 +126,12 @@
     if (changes["tadoku_manual_logging"]) {
       tadokuManualLogging = !!changes["tadoku_manual_logging"].newValue;
     }
+    if (changes["tadoku_session_expired"]) {
+      tadokuSessionExpired = !!changes["tadoku_session_expired"].newValue;
+      if (!tadokuSessionExpired) {
+        tadokuBannerDismissed = false;
+      }
+    }
     clearTimeout(refreshTimer);
     refreshTimer = setTimeout(async () => {
       await loadAllInstances();
@@ -493,18 +499,53 @@
   let muramasaLogging = $state(false);
   let tadokuLogging = $state(false);
   let tadokuManualLogging = $state(false);
+  let tadokuSessionExpired = $state(false);
+  let tadokuBannerDismissed = $state(false);
 
   async function loadIntegrationSettings() {
     const res = await browser.storage.local.get([
       "muramasa_logging",
       "tadoku_logging",
       "tadoku_manual_logging",
+      "tadoku_session_expired",
     ]);
     muramasaLogging = !!res.muramasa_logging;
     tadokuLogging = !!res.tadoku_logging;
     tadokuManualLogging = !!res.tadoku_manual_logging;
+    tadokuSessionExpired = !!res.tadoku_session_expired;
+
+    if (tadokuLogging) {
+      checkTadokuSession();
+    }
   }
   loadIntegrationSettings();
+
+  async function checkTadokuSession() {
+    try {
+      const res = await browser.runtime.sendMessage({ action: "tadoku_status" });
+      if (res && res.loggedIn) {
+        tadokuSessionExpired = false;
+        tadokuBannerDismissed = false;
+        await browser.storage.local.set({ tadoku_session_expired: false });
+      }
+    } catch {
+      // ignore network errors
+    }
+  }
+
+  function handleWindowFocus() {
+    if (tadokuLogging && tadokuSessionExpired) {
+      checkTadokuSession();
+    }
+  }
+
+  async function openTadokuLogin() {
+    if (browser?.tabs?.create) {
+      await browser.tabs.create({ url: "https://tadoku.app" });
+    } else {
+      window.open("https://tadoku.app", "_blank");
+    }
+  }
 
   async function pushTadokuLog(
     gameName: string,
@@ -2428,7 +2469,7 @@
   }
 </script>
 
-<svelte:window onclick={closeAllMenus} onscroll={closeAllMenus} />
+<svelte:window onclick={closeAllMenus} onscroll={closeAllMenus} onfocus={handleWindowFocus} />
 
 <div class="flex flex-col gap-10 px-20">
   <!-- Top Bar -->
@@ -2466,6 +2507,46 @@
       >
     </div>
   </div>
+
+  <!-- Tadoku Session Expiration Warning Banner -->
+  {#if tadokuLogging && tadokuSessionExpired && !tadokuBannerDismissed}
+    <div
+      transition:slide={{ duration: 180 }}
+      class="flex items-center justify-between gap-3 px-4 py-2.5 rounded-lg border border-amber-500/30 bg-amber-500/10 text-amber-200 text-xs sm:text-sm -mt-6"
+    >
+      <div class="flex items-center gap-2.5 min-w-0">
+        <svg class="h-4 w-4 shrink-0 text-amber-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="10"></circle>
+          <line x1="12" y1="8" x2="12" y2="12"></line>
+          <line x1="12" y1="16" x2="12.01" y2="16"></line>
+        </svg>
+        <span class="truncate sm:overflow-visible sm:whitespace-normal">
+          <strong class="font-semibold text-amber-300">Tadoku sync paused:</strong> Your session expired. Please log in on tadoku.app to resume automatic logging.
+        </span>
+      </div>
+      <div class="flex items-center gap-2 shrink-0">
+        <button
+          type="button"
+          class="px-2.5 py-1 rounded bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 font-medium text-xs transition-colors cursor-pointer border border-amber-500/30"
+          onclick={openTadokuLogin}
+        >
+          Log in to Tadoku
+        </button>
+        <button
+          type="button"
+          class="p-1 text-amber-300/70 hover:text-amber-100 transition-colors cursor-pointer rounded"
+          title="Dismiss banner"
+          aria-label="Dismiss banner"
+          onclick={() => (tadokuBannerDismissed = true)}
+        >
+          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        </button>
+      </div>
+    </div>
+  {/if}
 
   <!-- Game Filter Popup Menu -->
   {#if showFilterPanel}

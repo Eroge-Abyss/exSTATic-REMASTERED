@@ -42,12 +42,22 @@ export async function getTadokuAuthStatus(): Promise<{
       credentials: "include",
     });
     if (!roleResp.ok) {
+      const cfg = await browser.storage.local.get("tadoku_logging");
+      if (cfg.tadoku_logging) {
+        await browser.storage.local.set({ tadoku_session_expired: true });
+      }
       return { loggedIn: false };
     }
     const roleData = await roleResp.json();
     if (roleData.role === "guest" || !roleData.role) {
+      const cfg = await browser.storage.local.get("tadoku_logging");
+      if (cfg.tadoku_logging) {
+        await browser.storage.local.set({ tadoku_session_expired: true });
+      }
       return { loggedIn: false };
     }
+
+    await browser.storage.local.set({ tadoku_session_expired: false });
 
     let displayName = "Tadoku User";
     let email: string | undefined = undefined;
