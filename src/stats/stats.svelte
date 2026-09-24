@@ -833,6 +833,19 @@
     );
   }
 
+  async function bulkSetTadokuAutoLog(newState: boolean) {
+    const vnList = allInstances.filter((inst) => inst.type === "vn" || !inst.type);
+    for (const inst of vnList) {
+      await setGameTadokuAutoLog(inst.uuid, newState);
+    }
+    allInstances = await getAllInstances();
+    showToast(
+      newState
+        ? `Tadoku auto-log enabled for all ${vnList.length} titles`
+        : `Tadoku auto-log disabled for all ${vnList.length} titles`
+    );
+  }
+
   function handleAddCustomSession(dateStr: string, game: { uuid: string; name: string }) {
     closeDayMenu();
     showGamePanel = true;
@@ -2845,23 +2858,47 @@
 
       <!-- Active Games -->
       <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
-        <p class="text-xs font-semibold uppercase tracking-widest text-muted flex items-center">
-          Active Titles
-          {#if gameSearchQuery.trim()}
-            <span class="ml-1 text-[11px] normal-case text-accent font-medium">({displayedGames.length} of {uniqueGames.length})</span>
-          {:else}
-            <span class="ml-1 text-[11px] normal-case text-muted">({uniqueGames.length})</span>
+        <div class="flex items-center gap-2.5 flex-wrap">
+          <p class="text-xs font-semibold uppercase tracking-widest text-muted flex items-center">
+            Active Titles
+            {#if gameSearchQuery.trim()}
+              <span class="ml-1 text-[11px] normal-case text-accent font-medium">({displayedGames.length} of {uniqueGames.length})</span>
+            {:else}
+              <span class="ml-1 text-[11px] normal-case text-muted">({uniqueGames.length})</span>
+            {/if}
+            {#if autoDetectingBatch}
+              <span class="ml-2 text-[11px] normal-case text-accent font-medium animate-pulse inline-flex items-center gap-1">
+                <svg class="h-3 w-3 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                  <circle cx="11" cy="11" r="8"></circle>
+                  <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                </svg>
+                Auto-detecting VNDB…
+              </span>
+            {/if}
+          </p>
+          {#if tadokuLogging}
+            <div class="flex items-center gap-1 border-l border-dim pl-2.5 ml-0.5">
+              <span class="text-[10px] uppercase tracking-wider text-muted font-mono">Tadoku:</span>
+              <button
+                type="button"
+                class="text-[11px] text-muted hover:text-accent font-medium cursor-pointer transition-colors px-1 py-0.5 rounded"
+                title="Enable Tadoku auto-logging for all visual novels"
+                onclick={() => bulkSetTadokuAutoLog(true)}
+              >
+                Enable All
+              </button>
+              <span class="text-muted/40 text-xs">/</span>
+              <button
+                type="button"
+                class="text-[11px] text-muted hover:text-rose-400 font-medium cursor-pointer transition-colors px-1 py-0.5 rounded"
+                title="Disable Tadoku auto-logging for all visual novels"
+                onclick={() => bulkSetTadokuAutoLog(false)}
+              >
+                Disable All
+              </button>
+            </div>
           {/if}
-          {#if autoDetectingBatch}
-            <span class="ml-2 text-[11px] normal-case text-accent font-medium animate-pulse inline-flex items-center gap-1">
-              <svg class="h-3 w-3 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                <circle cx="11" cy="11" r="8"></circle>
-                <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
-              </svg>
-              Auto-detecting VNDB…
-            </span>
-          {/if}
-        </p>
+        </div>
 
         <!-- Search Input -->
         <div class="relative flex items-center min-w-44 sm:min-w-60 flex-1 sm:flex-none">
@@ -3008,7 +3045,9 @@
                           class="btn-sm btn-secondary text-[11px] px-1.5 py-0.5 flex items-center gap-1"
                           disabled={searchingVndbUuid === game.uuid}
                           onclick={() => autoDetectVndbId(game.uuid, game.name)}
-                          title="Auto-detect VNDB ID from VNDB API"
+                          title={failedVndbSearchUuids.has(game.uuid)
+                            ? "No match found on VNDB (click to retry, or set manually with '+')"
+                            : "Auto-detect VNDB ID from VNDB API"}
                         >
                           <svg class="h-3 w-3 {searchingVndbUuid === game.uuid ? 'animate-spin' : ''}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                             <circle cx="11" cy="11" r="8"></circle>
@@ -3016,6 +3055,14 @@
                           </svg>
                           <span>{searchingVndbUuid === game.uuid ? "Searching…" : "Detect VNDB"}</span>
                         </button>
+                        {#if failedVndbSearchUuids.has(game.uuid)}
+                          <span
+                            class="text-[10px] text-amber-400 font-mono px-0.5"
+                            title="No match found on VNDB. Click 'Detect VNDB' to retry, or '+' to set manually."
+                          >
+                            (no match)
+                          </span>
+                        {/if}
                         <button
                           class="btn-action text-muted hover:text-strong p-0.5"
                           title="Set VNDB ID manually"

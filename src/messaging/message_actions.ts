@@ -408,6 +408,37 @@ export async function message_action(args: MessageActionArgs) {
     });
   } else if (args.action === "tadoku_day_reset_push") {
     return await runTadokuDayResetAutoPush();
+  } else if (args.action === "tadoku_contest_info") {
+    try {
+      const contest = await getLatestOfficialContest();
+      if (!contest || !contest.id) return { active: false };
+      const now = Date.now();
+      const start = new Date(contest.contest_start).getTime();
+      const end = new Date(contest.contest_end).getTime();
+      const isOngoing = now >= start && now <= end;
+      let registered = false;
+      try {
+        const regResp = await fetch(`https://tadoku.app/api/internal/immersion/contests/${contest.id}/registration`, {
+          credentials: "include",
+        });
+        if (regResp.status === 200) {
+          const reg = await regResp.json();
+          registered = reg.languages?.some((l: any) => l.code === "jpn") ?? false;
+        }
+      } catch {
+        // ignore registration fetch failure
+      }
+      return {
+        active: isOngoing,
+        contestId: contest.id,
+        title: contest.title,
+        registered,
+        start: contest.contest_start,
+        end: contest.contest_end,
+      };
+    } catch {
+      return { active: false };
+    }
   }
 }
 

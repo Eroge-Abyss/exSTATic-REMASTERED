@@ -30,6 +30,45 @@
     checked: false,
     loggedIn: false,
   });
+  let lastDayResetDate = $state<string | null>(null);
+  let lastDayResetCount = $state<number>(0);
+  let tadokuContestInfo = $state<{
+    checked: boolean;
+    active: boolean;
+    title?: string;
+    registered?: boolean;
+  }>({
+    checked: false,
+    active: false,
+  });
+
+  const refreshSyncStats = async () => {
+    const data = await browser.storage.local.get([
+      "tadoku_last_day_reset_processed",
+      "tadoku_pushed_records",
+    ]);
+    lastDayResetDate = data.tadoku_last_day_reset_processed ?? null;
+    const pushed = data.tadoku_pushed_records ?? {};
+    if (lastDayResetDate) {
+      lastDayResetCount = Object.keys(pushed).filter((k) => k.endsWith(`_${lastDayResetDate}`)).length;
+    }
+  };
+
+  const checkTadokuContestInfo = async () => {
+    try {
+      const res = await browser.runtime.sendMessage({ action: "tadoku_contest_info" });
+      if (res) {
+        tadokuContestInfo = {
+          checked: true,
+          active: !!res.active,
+          title: res.title,
+          registered: !!res.registered,
+        };
+      }
+    } catch {
+      tadokuContestInfo = { checked: true, active: false };
+    }
+  };
 
   const checkTadokuStatus = async () => {
     try {
@@ -62,6 +101,8 @@
     });
     if (tadokuLogging) {
       checkTadokuStatus();
+      checkTadokuContestInfo();
+      refreshSyncStats();
     }
   };
 
@@ -108,6 +149,8 @@
       "tadoku_logging",
       "tadoku_auto_join_contest",
       "tadoku_manual_logging",
+      "tadoku_last_day_reset_processed",
+      "tadoku_pushed_records",
     ]);
     disableAnimations = !!data.disable_animations;
     showTexthookerWs =
@@ -122,12 +165,20 @@
     tadokuLogging = !!data.tadoku_logging;
     tadokuAutoJoinContest = data.tadoku_auto_join_contest !== false;
     tadokuManualLogging = !!data.tadoku_manual_logging;
+    lastDayResetDate = data.tadoku_last_day_reset_processed ?? null;
+    const pushed = data.tadoku_pushed_records ?? {};
+    if (lastDayResetDate) {
+      lastDayResetCount = Object.keys(pushed).filter((k) => k.endsWith(`_${lastDayResetDate}`)).length;
+    }
     if (tadokuLogging) {
       checkTadokuStatus();
+      checkTadokuContestInfo();
     }
     const handleFocus = () => {
       if (tadokuLogging) {
         checkTadokuStatus();
+        checkTadokuContestInfo();
+        refreshSyncStats();
       }
     };
     window.addEventListener("click", handleClickOutside);
@@ -396,22 +447,45 @@
             type="button"
             class="text-xs text-muted hover:text-text cursor-pointer ml-1 px-1.5 py-0.5 rounded bg-surface hover:bg-hover transition-colors"
             title="Refresh status"
-            onclick={checkTadokuStatus}
+            onclick={() => {
+              checkTadokuStatus();
+              checkTadokuContestInfo();
+              refreshSyncStats();
+            }}
           >
             ↻
           </button>
         </div>
       </SettingRow>
+      {#if lastDayResetDate}
+        <SettingRow label="Last Automatic Sync">
+          <span class="text-xs text-text">
+            {lastDayResetDate} &bull; {lastDayResetCount > 0 ? `${lastDayResetCount} visual novel${lastDayResetCount === 1 ? '' : 's'} logged` : 'No reading to log'}
+          </span>
+        </SettingRow>
+      {/if}
       <SettingRow label="Auto-join Official Contests">
-        <button
-          type="button"
-          class="rounded-lg px-6 py-2 font-medium transition-colors cursor-pointer {tadokuAutoJoinContest
-            ? 'bg-button text-white hover:bg-hover'
-            : 'bg-backdrop text-text hover:opacity-80'}"
-          onclick={toggleTadokuAutoJoin}
-        >
-          {tadokuAutoJoinContest ? "ON (Enabled)" : "OFF (Disabled)"}
-        </button>
+        <div class="flex items-center gap-3">
+          <button
+            type="button"
+            class="rounded-lg px-6 py-2 font-medium transition-colors cursor-pointer {tadokuAutoJoinContest
+              ? 'bg-button text-white hover:bg-hover'
+              : 'bg-backdrop text-text hover:opacity-80'}"
+            onclick={toggleTadokuAutoJoin}
+          >
+            {tadokuAutoJoinContest ? "ON (Enabled)" : "OFF (Disabled)"}
+          </button>
+          {#if tadokuContestInfo.checked}
+            {#if tadokuContestInfo.active && tadokuContestInfo.title}
+              <span class="inline-flex items-center gap-1.5 text-xs text-emerald-400 font-medium">
+                <span class="h-1.5 w-1.5 rounded-full bg-emerald-400"></span>
+                Active: {tadokuContestInfo.title} {tadokuContestInfo.registered ? '(Japanese registered)' : ''}
+              </span>
+            {:else}
+              <span class="text-xs text-muted">No active official contest</span>
+            {/if}
+          {/if}
+        </div>
       </SettingRow>
       <SettingRow label="Manual Logging">
         <button
