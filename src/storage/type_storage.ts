@@ -28,6 +28,7 @@ export interface TypeProperties {
 export class TypeStorage {
   type: string;
   properties: TypeProperties;
+  #mediaCache: Record<string, string> | null = null;
 
   constructor(type: string, properties: TypeProperties) {
     this.type = type;
@@ -63,14 +64,17 @@ export class TypeStorage {
   }
 
   async getMedia(given_identifier: string): Promise<string> {
-    const media_entries = await browser.storage.local.get("media");
     const media_key = JSON.stringify([given_identifier, this.type]);
 
-    if (
-      media_entries.hasOwnProperty("media") &&
-      media_entries["media"].hasOwnProperty(media_key)
-    ) {
-      return media_entries["media"][media_key];
+    if (this.#mediaCache && this.#mediaCache.hasOwnProperty(media_key)) {
+      return this.#mediaCache[media_key];
+    }
+
+    const media_entries = await browser.storage.local.get("media");
+    this.#mediaCache = media_entries["media"] ?? {};
+
+    if (this.#mediaCache && this.#mediaCache.hasOwnProperty(media_key)) {
+      return this.#mediaCache[media_key];
     } else {
       return this.addMedia(given_identifier);
     }
@@ -101,6 +105,7 @@ export class TypeStorage {
       }
 
       await browser.storage.local.set(media_entries);
+      this.#mediaCache = media_entries["media"];
 
       if (this.type === "vn") {
         browser.runtime
@@ -111,6 +116,8 @@ export class TypeStorage {
           })
           .catch(() => {});
       }
+    } else {
+      this.#mediaCache = media_entries["media"];
     }
 
     return media_entries["media"][media_key];

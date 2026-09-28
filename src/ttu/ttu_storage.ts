@@ -63,7 +63,7 @@ export class TTUStorage extends MediaStorage<TTUDetails> {
     await this.instance_storage?.addDailyStats(date, stats);
 
     if (chars_read > (this.details?.last_char_count ?? 0))
-      this.start_ticker(false);
+      this.start_ticker();
     else if (chars_read < (this.details?.last_char_count ?? 0))
       this.stop_ticker();
 

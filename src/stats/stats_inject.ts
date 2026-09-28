@@ -4,7 +4,7 @@ import { applyThemeSync, applyTheme } from "../themes/apply_theme";
 applyThemeSync();
 applyTheme();
 
-import { getData } from "../data_wrangling/data_extraction";
+import { getData, scanAndRepairAllNegativeStats } from "../data_wrangling/data_extraction";
 import Stats from "./stats.svelte";
 
 import { parseISO } from "date-fns";
@@ -27,6 +27,12 @@ function safeParseDate(val: unknown): Date | null {
 }
 
 const setup = async () => {
+  try {
+    await scanAndRepairAllNegativeStats();
+  } catch (e) {
+    console.warn("exSTATic: scanAndRepairAllNegativeStats error:", e);
+  }
+
   const rawData = await getData();
   const validData = (rawData ?? []).filter((d) => safeParseDate(d?.date) !== null);
 

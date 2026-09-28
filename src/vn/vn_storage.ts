@@ -61,7 +61,7 @@ export class VNStorage extends MediaStorage {
     // Mark as accepted before writes so rapid re-sends of the same text
     // don't pass the dedup check while insertLine is in-flight.
     this.#lastLineText = line;
-    this.start_ticker(false);
+    this.start_ticker();
 
     // Dispatch before insertLine — text appears at ~0ms perceived delay.
     // insertLine + stat writes complete silently in the background.

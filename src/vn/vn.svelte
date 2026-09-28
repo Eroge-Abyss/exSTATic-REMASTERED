@@ -424,8 +424,7 @@
   <LineHolder
     bind:lines
     onclick={() => (menu = false)}
-    on:dblclick
-    {ondblclick}
+    ondblclick={null}
   />
 </div>
 

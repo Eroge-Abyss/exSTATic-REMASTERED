@@ -67,7 +67,6 @@ export function dataFetched(event: MessageEvent) {
 
   // Parse provided data
   const data = JSON.parse(event.data);
-  console.log("Recieved Socket Data: ", data);
 
   if ("type" in data && data.type === "translate") return;
 

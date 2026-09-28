@@ -52,6 +52,8 @@ export class InstanceStorage<
   /** The date string that today_stats was accumulated for. Used to detect
    *  midnight rollovers so today_stats is reset rather than carrying over. */
   #todayDate: string = dateNowString();
+  /** In-memory running total of all-time chars read for this instance. */
+  #totalCharsCache: number | null = null;
   // ──────────────────────────────────────────────────────────────────────────
 
 
@@ -163,11 +165,19 @@ export class InstanceStorage<
       }
     });
 
+    this.#totalCharsCache = null;
     await browser.storage.local.set(date_stats);
   }
 
   async addDailyStats(date: string, values: Partial<Stat>, multiple = 1) {
     const today = dateNowString();
+
+    if (values.chars_read !== undefined && this.#totalCharsCache !== null) {
+      this.#totalCharsCache = Math.max(
+        0,
+        this.#totalCharsCache + values.chars_read * multiple,
+      );
+    }
 
     // Update today_stats synchronously so any concurrent reader (subStats,
     // Tadoku) always sees the correct current value without waiting for flush.
@@ -370,6 +380,10 @@ export class InstanceStorage<
   }
 
   async getTotalCharsRead(): Promise<number> {
+    if (this.#totalCharsCache !== null) {
+      return this.#totalCharsCache;
+    }
+
     const dates_entry = await browser.storage.local.get("immersion_dates");
     const dates: string[] = dates_entry["immersion_dates"] ?? [];
 
@@ -377,13 +391,21 @@ export class InstanceStorage<
       JSON.stringify([this.client, this.uuid, date]),
     );
 
-    if (keys.length === 0) return 0;
+    if (keys.length === 0) {
+      this.#totalCharsCache = 0;
+      return 0;
+    }
 
     const stats = await browser.storage.local.get(keys);
 
-    return Object.values(stats).reduce((total: number, entry: any) => {
-      return total + (entry?.chars_read ?? 0);
-    }, 0);
+    this.#totalCharsCache = Object.values(stats).reduce(
+      (total: number, entry: any) => {
+        return total + (entry?.chars_read ?? 0);
+      },
+      0,
+    );
+
+    return this.#totalCharsCache;
   }
 }
 

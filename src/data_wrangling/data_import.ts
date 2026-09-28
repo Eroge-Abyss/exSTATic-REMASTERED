@@ -1,4 +1,3 @@
-import { TypeStorage } from "../storage/type_storage";
 import { InstanceStorage, type Stat } from "../storage/instance_storage";
 
 import * as browser from "webextension-polyfill";

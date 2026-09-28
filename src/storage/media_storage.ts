@@ -5,6 +5,18 @@ import { TypeStorage, type TypeProperties } from "./type_storage";
 
 const REFRESH_STATS_INTERVAL = 1000; // in milliseconds
 
+// Cache listen_status in memory so toggleActive() and extensionActivated()
+// never block on asynchronous storage IPC.
+let listen_status_cached = true;
+browser.storage.local.get("listen_status").then((r) => {
+  listen_status_cached = r["listen_status"] ?? true;
+});
+browser.storage.onChanged.addListener((changes, area) => {
+  if (area === "local" && "listen_status" in changes) {
+    listen_status_cached = changes["listen_status"].newValue ?? true;
+  }
+});
+
 // EXTENDED STORAGE SPEC
 // {
 //     "type": {
@@ -107,23 +119,24 @@ export class MediaStorage<TDetails extends InstanceDetails = InstanceDetails> {
   start_ticker(event = true) {
     if (this.previous_time == undefined) {
       this.previous_time = timeNowSeconds();
-    }
-
-    if (event) {
-      const event = new Event("status_active");
-      document.dispatchEvent(event);
+      if (event) {
+        const event = new Event("status_active");
+        document.dispatchEvent(event);
+      }
     }
   }
 
   stop_ticker(event = true) {
-    this.previous_time = undefined;
+    if (this.previous_time !== undefined) {
+      this.previous_time = undefined;
 
-    // Persist any buffered stat deltas before going idle.
-    this.instance_storage?.flushPendingStats();
+      // Persist any buffered stat deltas before going idle.
+      this.instance_storage?.flushPendingStats();
 
-    if (event) {
-      const event = new Event("status_inactive");
-      document.dispatchEvent(event);
+      if (event) {
+        const event = new Event("status_inactive");
+        document.dispatchEvent(event);
+      }
     }
   }
 
@@ -147,7 +160,7 @@ export class MediaStorage<TDetails extends InstanceDetails = InstanceDetails> {
       await this.instance_storage.addDailyStats(dateNowString(), {
         time_read: time_between_ticks,
       });
-      this.start_ticker();
+      document.dispatchEvent(new Event("stats_tick"));
       // Flush all buffered deltas (chars, lines, time) in one write per second.
       await this.instance_storage.flushPendingStats();
     } else {
@@ -156,26 +169,27 @@ export class MediaStorage<TDetails extends InstanceDetails = InstanceDetails> {
   }
 
   async extensionActivated() {
-    const listen_status = (await browser.storage.local.get("listen_status"))[
-      "listen_status"
-    ];
-    return listen_status == true || listen_status === undefined;
+    return listen_status_cached;
   }
 
   async toggleActive() {
-    const listen_status = await this.extensionActivated();
-    if (!listen_status) {
+    if (!listen_status_cached) {
       this.stop_ticker();
       return;
     }
 
-    const time = timeNowSeconds();
     if (this.instance_storage === undefined) return;
 
     if (this.previous_time === undefined) {
-      await this.instance_storage.updateDetails({ last_active_at: time });
+      const time = timeNowSeconds();
+      // Optimistic instant unblur / resume (0ms)
       this.start_ticker();
+      // Persist last_active_at in the background without blocking the UI
+      this.instance_storage.updateDetails({ last_active_at: time }).catch((e) => {
+        console.error("Failed to update last_active_at:", e);
+      });
     } else {
+      // Optimistic instant blur / pause (0ms)
       this.stop_ticker();
     }
   }

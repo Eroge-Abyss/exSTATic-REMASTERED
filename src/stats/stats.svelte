@@ -16,13 +16,10 @@
     differenceInDays,
     isSameMonth,
     isSameYear,
-    isSameWeek,
     subMonths,
     addMonths,
     subYears,
     addYears,
-    subWeeks,
-    addWeeks,
     subDays,
     addDays,
     format as formatDate,
@@ -51,6 +48,7 @@
     restoreManualStats,
     createManualTitle,
     repairDateStats,
+    scanAndRepairAllNegativeStats,
     type DataEntry,
     type StatSnapshot,
   } from "../data_wrangling/data_extraction";
@@ -822,6 +820,11 @@
   }
 
   async function refreshData() {
+    try {
+      await scanAndRepairAllNegativeStats();
+    } catch (e) {
+      console.warn("exSTATic: scanAndRepairAllNegativeStats error:", e);
+    }
     const newData = await getData();
     data =
       (newData ?? [])
@@ -1088,10 +1091,12 @@
         given_identifier: v[0].given_identifier,
         type: v[0].type,
         date: v[0].date,
-        time_read: sum(v, (d) => d.time_read),
-        chars_read: sum(v, (d) => d.chars_read),
+        time_read: Math.max(0, sum(v, (d) => d.time_read) || 0),
+        chars_read: Math.max(0, sum(v, (d) => d.chars_read) || 0),
       }));
-    }),
+    }).filter(
+      (d) => (d.chars_read ?? 0) >= 0 && (d.time_read ?? 0) >= 0,
+    ),
   );
 
   // Get all unique game names for the filter
@@ -1188,9 +1193,15 @@
     );
   });
 
-  // Get all unique game names visible in the current year/All Time + media filter.
+  // Get all unique game names visible across all time for the current media filter.
   let allGameNames = $derived(
-    Array.from(new Set(yearMediaData.map((d) => d.name))).sort((a, b) =>
+    Array.from(
+      new Set(
+        processedData
+          .filter((d) => mediaType === "all" || d.type === mediaType)
+          .map((d) => d.name),
+      ),
+    ).sort((a, b) =>
       (a ?? "").localeCompare(b ?? "", undefined, { sensitivity: "base" }),
     ),
   );
@@ -1266,8 +1277,8 @@
   let uuid_summary = $derived(
     uuid_groups.map(([, v]) => ({
       name: v[0].name,
-      time_read: sum(v, (d) => d.time_read),
-      chars_read: sum(v, (d) => d.chars_read),
+      time_read: Math.max(0, sum(v, (d) => d.time_read) || 0),
+      chars_read: Math.max(0, sum(v, (d) => d.chars_read) || 0),
     })),
   );
 
@@ -1275,8 +1286,8 @@
   let date_summary = $derived(
     date_groups.map(([, v]) => ({
       date: v[0].date,
-      time_read: sum(v, (d) => d.time_read),
-      chars_read: sum(v, (d) => d.chars_read),
+      time_read: Math.max(0, sum(v, (d) => d.time_read) || 0),
+      chars_read: Math.max(0, sum(v, (d) => d.chars_read) || 0),
       titles: Array.from(new Set(v.map((d) => d.name))).join(", "),
     })),
   );
@@ -1370,15 +1381,18 @@
   };
 
   let statCards = $derived.by(() => {
-    const totalChars = sum(statsFilteredData, (d) => d.chars_read);
-    const totalSecs = sum(statsFilteredData, (d) => d.time_read);
-    const activeDays = new Set(statsFilteredData.map((d) => d.date)).size;
+    const validEntries = statsFilteredData.filter(
+      (d) => (d.chars_read ?? 0) >= 0 && (d.time_read ?? 0) >= 0,
+    );
+    const totalChars = Math.max(0, sum(validEntries, (d) => d.chars_read) || 0);
+    const totalSecs = Math.max(0, sum(validEntries, (d) => d.time_read) || 0);
+    const activeDays = new Set(validEntries.map((d) => d.date)).size;
     const totalHrs = totalSecs / 3600;
     const avgSpeed =
       totalSecs > 0 ? Math.round((totalChars / totalSecs) * 3600) : 0;
 
     // Span in calendar days (at least 1)
-    const dates = statsFilteredData
+    const dates = validEntries
       .map((d) => safeParseDate(d.date))
       .filter((d): d is Date => d !== null);
     const earliestMs = dates.reduce(
@@ -1602,6 +1616,7 @@
   const getSessionExtremes = (dataArray: typeof baseData) => {
     const dailyMap = new Map<string, { chars: number; time: number }>();
     for (const d of dataArray) {
+      if ((d.chars_read ?? 0) < 0 || (d.time_read ?? 0) < 0) continue;
       if (!dailyMap.has(d.date)) dailyMap.set(d.date, { chars: 0, time: 0 });
       const current = dailyMap.get(d.date)!;
       current.chars += d.chars_read;
@@ -2081,6 +2096,8 @@
   }
 
   let detailBuckets = $derived.by<DetailBucket[]>(() => {
+    const sourceData =
+      selectedPeriod === "All Time" ? statsBaseData : statsFilteredData;
     const buckets: {
       label: string;
       filterFn: (d: (typeof statsFilteredData)[0]) => boolean;
@@ -2185,7 +2202,7 @@
     } else {
       // All Time
       if (detailGranularity === "Year") {
-        const allDates = statsFilteredData
+        const allDates = sourceData
           .map((d) => safeParseDate(d.date))
           .filter((d): d is Date => d !== null);
         const minY =
@@ -2203,7 +2220,7 @@
           });
         }
       } else {
-        const allDates = statsFilteredData
+        const allDates = sourceData
           .map((d) => safeParseDate(d.date))
           .filter((d): d is Date => d !== null);
         const minMs =
@@ -2233,9 +2250,11 @@
     }
 
     return buckets.map((b) => {
-      const entries = statsFilteredData.filter(b.filterFn);
-      const chars = sum(entries, (e) => e.chars_read) || 0;
-      const time = sum(entries, (e) => e.time_read) || 0;
+      const entries = sourceData
+        .filter(b.filterFn)
+        .filter((e) => (e.chars_read ?? 0) >= 0 && (e.time_read ?? 0) >= 0);
+      const chars = Math.max(0, sum(entries, (e) => e.chars_read) || 0);
+      const time = Math.max(0, sum(entries, (e) => e.time_read) || 0);
       const activeDays = new Set(entries.map((e) => e.date)).size;
       const speed =
         time > 0 ? Math.round((chars / time) * 3600) : 0;
@@ -2257,7 +2276,7 @@
         sessionChars,
         sessionTime,
         activeDays,
-        value,
+        value: Math.max(0, value),
       };
     });
   });
@@ -2265,30 +2284,34 @@
   let bestSessions = $derived.by(() => {
     const dailyMap = new Map<string, typeof statsBaseData>();
     for (const d of statsBaseData) {
+      if ((d.chars_read ?? 0) < 0 || (d.time_read ?? 0) < 0) continue;
       if (!dailyMap.has(d.date)) dailyMap.set(d.date, []);
       dailyMap.get(d.date)!.push(d);
     }
-    const list = Array.from(dailyMap.entries()).map(([date, entries]) => {
-      const chars = sum(entries, (e) => e.chars_read) || 0;
-      const time = sum(entries, (e) => e.time_read) || 0;
-      const speed =
-        time >= 60
-          ? Math.round((chars / time) * 3600)
-          : time > 0
+    const list = Array.from(dailyMap.entries())
+      .map(([date, entries]) => {
+        const valid = entries.filter((e) => (e.chars_read ?? 0) >= 0 && (e.time_read ?? 0) >= 0);
+        const chars = Math.max(0, sum(valid, (e) => e.chars_read) || 0);
+        const time = Math.max(0, sum(valid, (e) => e.time_read) || 0);
+        const speed =
+          time >= 60
             ? Math.round((chars / time) * 3600)
-            : 0;
-      return {
-        date,
-        periodStart: date,
-        periodEnd: date,
-        label: safeFormatDate(date, "EEE, MMM d, yyyy"),
-        chars,
-        time,
-        speed,
-        sessionChars: chars,
-        sessionTime: time,
-      };
-    });
+            : time > 0
+              ? Math.round((chars / time) * 3600)
+              : 0;
+        return {
+          date,
+          periodStart: date,
+          periodEnd: date,
+          label: safeFormatDate(date, "EEE, MMM d, yyyy"),
+          chars,
+          time,
+          speed,
+          sessionChars: chars,
+          sessionTime: time,
+        };
+      })
+      .filter((s) => s.chars > 0 || s.time > 0);
 
     list.sort((a, b) => {
       if (detailStatKey === "chars" || detailStatKey === "sessionChars")
@@ -2305,6 +2328,7 @@
   let bestWeeks = $derived.by(() => {
     const weekMap = new Map<string, typeof statsBaseData>();
     for (const d of statsBaseData) {
+      if ((d.chars_read ?? 0) < 0 || (d.time_read ?? 0) < 0) continue;
       const pDate = safeParseDate(d.date);
       if (!pDate) continue;
       const wStart = safeFormatDate(
@@ -2314,29 +2338,32 @@
       if (!weekMap.has(wStart)) weekMap.set(wStart, []);
       weekMap.get(wStart)!.push(d);
     }
-    const list = Array.from(weekMap.entries()).map(([wStart, entries]) => {
-      const wStartDate = safeParseDate(wStart) ?? new Date();
-      const wEndDate = addDays(wStartDate, 6);
-      const wEnd = safeFormatDate(wEndDate, "yyyy-MM-dd");
-      const chars = sum(entries, (e) => e.chars_read) || 0;
-      const time = sum(entries, (e) => e.time_read) || 0;
-      const activeDays = new Set(entries.map((e) => e.date)).size;
-      const speed = time > 0 ? Math.round((chars / time) * 3600) : 0;
-      const sessionChars =
-        activeDays > 0 ? Math.round(chars / activeDays) : 0;
-      const sessionTime = activeDays > 0 ? time / activeDays : 0;
-      return {
-        periodStart: wStart,
-        periodEnd: wEnd,
-        label: `${safeFormatDate(wStartDate, "MMM d")} - ${safeFormatDate(wEndDate, "MMM d, yyyy")}`,
-        chars,
-        time,
-        speed,
-        sessionChars,
-        sessionTime,
-        activeDays,
-      };
-    });
+    const list = Array.from(weekMap.entries())
+      .map(([wStart, entries]) => {
+        const valid = entries.filter((e) => (e.chars_read ?? 0) >= 0 && (e.time_read ?? 0) >= 0);
+        const wStartDate = safeParseDate(wStart) ?? new Date();
+        const wEndDate = addDays(wStartDate, 6);
+        const wEnd = safeFormatDate(wEndDate, "yyyy-MM-dd");
+        const chars = Math.max(0, sum(valid, (e) => e.chars_read) || 0);
+        const time = Math.max(0, sum(valid, (e) => e.time_read) || 0);
+        const activeDays = new Set(valid.map((e) => e.date)).size;
+        const speed = time > 0 ? Math.round((chars / time) * 3600) : 0;
+        const sessionChars =
+          activeDays > 0 ? Math.round(chars / activeDays) : 0;
+        const sessionTime = activeDays > 0 ? time / activeDays : 0;
+        return {
+          periodStart: wStart,
+          periodEnd: wEnd,
+          label: `${safeFormatDate(wStartDate, "MMM d")} - ${safeFormatDate(wEndDate, "MMM d, yyyy")}`,
+          chars,
+          time,
+          speed,
+          sessionChars,
+          sessionTime,
+          activeDays,
+        };
+      })
+      .filter((w) => w.chars > 0 || w.time > 0);
 
     list.sort((a, b) => {
       if (detailStatKey === "chars") return b.chars - a.chars;
@@ -2355,34 +2382,38 @@
   let bestMonths = $derived.by(() => {
     const monthMap = new Map<string, typeof statsBaseData>();
     for (const d of statsBaseData) {
+      if ((d.chars_read ?? 0) < 0 || (d.time_read ?? 0) < 0) continue;
       const mKey = d.date.substring(0, 7);
       if (!monthMap.has(mKey)) monthMap.set(mKey, []);
       monthMap.get(mKey)!.push(d);
     }
-    const list = Array.from(monthMap.entries()).map(([mKey, entries]) => {
-      const mStartDate = safeParseDate(`${mKey}-01`) ?? new Date();
-      const mEndDate = endOfMonth(mStartDate);
-      const mStart = safeFormatDate(mStartDate, "yyyy-MM-dd");
-      const mEnd = safeFormatDate(mEndDate, "yyyy-MM-dd");
-      const chars = sum(entries, (e) => e.chars_read) || 0;
-      const time = sum(entries, (e) => e.time_read) || 0;
-      const activeDays = new Set(entries.map((e) => e.date)).size;
-      const speed = time > 0 ? Math.round((chars / time) * 3600) : 0;
-      const sessionChars =
-        activeDays > 0 ? Math.round(chars / activeDays) : 0;
-      const sessionTime = activeDays > 0 ? time / activeDays : 0;
-      return {
-        periodStart: mStart,
-        periodEnd: mEnd,
-        label: safeFormatDate(mStartDate, "MMMM yyyy"),
-        chars,
-        time,
-        speed,
-        sessionChars,
-        sessionTime,
-        activeDays,
-      };
-    });
+    const list = Array.from(monthMap.entries())
+      .map(([mKey, entries]) => {
+        const valid = entries.filter((e) => (e.chars_read ?? 0) >= 0 && (e.time_read ?? 0) >= 0);
+        const mStartDate = safeParseDate(`${mKey}-01`) ?? new Date();
+        const mEndDate = endOfMonth(mStartDate);
+        const mStart = safeFormatDate(mStartDate, "yyyy-MM-dd");
+        const mEnd = safeFormatDate(mEndDate, "yyyy-MM-dd");
+        const chars = Math.max(0, sum(valid, (e) => e.chars_read) || 0);
+        const time = Math.max(0, sum(valid, (e) => e.time_read) || 0);
+        const activeDays = new Set(valid.map((e) => e.date)).size;
+        const speed = time > 0 ? Math.round((chars / time) * 3600) : 0;
+        const sessionChars =
+          activeDays > 0 ? Math.round(chars / activeDays) : 0;
+        const sessionTime = activeDays > 0 ? time / activeDays : 0;
+        return {
+          periodStart: mStart,
+          periodEnd: mEnd,
+          label: safeFormatDate(mStartDate, "MMMM yyyy"),
+          chars,
+          time,
+          speed,
+          sessionChars,
+          sessionTime,
+          activeDays,
+        };
+      })
+      .filter((m) => m.chars > 0 || m.time > 0);
 
     list.sort((a, b) => {
       if (detailStatKey === "chars") return b.chars - a.chars;

@@ -10,7 +10,6 @@
   import { format } from "d3-format";
   import iwanthue from "iwanthue";
   import { scaleLinear, scaleBand, scaleLog } from "d3-scale";
-  import { interpolateRgb } from "d3-interpolate";
   import type { DataEntry } from "../../data_wrangling/data_extraction";
   import * as browser from "webextension-polyfill";
 

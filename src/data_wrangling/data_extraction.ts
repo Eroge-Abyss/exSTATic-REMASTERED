@@ -16,41 +16,6 @@ export interface DataEntry {
   [key: string]: unknown;
 }
 
-export interface SecondaryMergeInfo {
-  secondaryUuid: string;
-  secondaryName: string;
-  secondaryDetails: Record<string, any>;
-  secondaryStats: Record<string, Stat>;
-  lineIdMap: [number, number][];
-  mediaUpdates: Record<string, string>;
-}
-
-/** Snapshot saved before every merge so the operation can be fully undone. */
-export interface MergeSnapshot {
-  timestamp: string;
-  primaryUuid: string;
-  primaryName: string;
-  /** primary's last_line_added before the merge */
-  primaryLastLineId: number;
-  /** primary's per-date stats before the merge */
-  primaryStatsBefore: Record<string, Stat>;
-  /** Secondaries merged into primary in this atomic transaction */
-  secondaries?: SecondaryMergeInfo[];
-  /** Date strings that had secondary entries (for restoring date arrays) */
-  affectedDates: string[];
-  /** Pre-merge date array entries for full restoration */
-  dateEntriesBefore?: Record<string, [string, string][]>;
-  /** List of primary stat keys written during merge */
-  writtenPriKeys?: string[];
-  // Legacy single-secondary fields for backwards compatibility with older snapshots:
-  secondaryUuid?: string;
-  secondaryName?: string;
-  secondaryDetails?: Record<string, any>;
-  secondaryStats?: Record<string, Stat>;
-  lineIdMap?: [number, number][];
-  mediaUpdates?: Record<string, string>;
-}
-
 /** Safely removes one or more keys in batches of 200, preventing empty array errors and IPC payload limits. */
 export async function safeRemove(keys: string | string[] | undefined | null): Promise<void> {
   if (!keys) return;
@@ -161,11 +126,14 @@ export async function getDateData(date: string): Promise<DataEntry[]> {
 
     // Processed stats
     if (stats_entry.hasOwnProperty("time_read")) {
-      stats_entry["time_read"] = stats_entry["time_read"];
+      stats_entry["time_read"] = Math.max(0, Number(stats_entry["time_read"]) || 0);
 
       if (stats_entry.hasOwnProperty("chars_read")) {
+        stats_entry["chars_read"] = Math.max(0, Number(stats_entry["chars_read"]) || 0);
         stats_entry["read_speed"] =
-          stats_entry["chars_read"] / stats_entry["time_read"];
+          stats_entry["time_read"] > 0
+            ? stats_entry["chars_read"] / stats_entry["time_read"]
+            : 0;
       }
     }
 
@@ -468,510 +436,6 @@ export async function setGameTadokuAutoLog(
   await browser.storage.local.set({ [uuid]: details });
 }
 
-// ------- Duplicate Detection & Merging -------
-
-export async function getDuplicateGroups(): Promise<
-  { name: string; uuids: string[] }[]
-> {
-  const immersionDates =
-    (await browser.storage.local.get("immersion_dates"))["immersion_dates"] ??
-    [];
-
-  // Collect all unique UUIDs across all dates
-  const allUuids = new Set<string>();
-  for (const date of immersionDates) {
-    const entries: [string, string][] =
-      (await browser.storage.local.get(date))[date] ?? [];
-    for (const [, uuid] of entries) allUuids.add(uuid);
-  }
-
-  // Group by name
-  const nameMap = new Map<string, string[]>();
-  for (const uuid of allUuids) {
-    const raw = await browser.storage.local.get(uuid);
-    const name: string = raw[uuid]?.name ?? raw[uuid]?.given_identifier ?? uuid;
-    if (!nameMap.has(name)) nameMap.set(name, []);
-    nameMap.get(name)!.push(uuid);
-  }
-
-  return Array.from(nameMap.entries())
-    .filter(([, uuids]) => uuids.length > 1)
-    .map(([name, uuids]) => ({ name, uuids }));
-}
-
-export async function mergeGameGroup(
-  primaryUuid: string,
-  secondaryUuids: string[],
-): Promise<void> {
-  const validSecondaries = [
-    ...new Set(secondaryUuids.filter((u) => u && u !== primaryUuid)),
-  ];
-  if (validSecondaries.length === 0) return;
-
-  const clientData = await browser.storage.local.get("client");
-  const defaultClient: string = clientData["client"] ?? "";
-
-  const immersionDates: string[] =
-    (await browser.storage.local.get("immersion_dates"))["immersion_dates"] ??
-    [];
-
-  // ── Snapshot pre-merge state for undo ─────────────────────────────────────
-  const priDetailsRaw = await browser.storage.local.get(primaryUuid);
-  const priDetails = priDetailsRaw[primaryUuid] ?? {};
-
-  const secDetailsMap: Record<string, Record<string, any>> = {};
-  for (const sUuid of validSecondaries) {
-    const raw = await browser.storage.local.get(sUuid);
-    secDetailsMap[sUuid] = raw[sUuid] ?? {};
-  }
-
-  const primaryStatsBefore: Record<string, Stat> = {};
-  const secStatsMap: Record<string, Record<string, Stat>> = {};
-  for (const sUuid of validSecondaries) secStatsMap[sUuid] = {};
-
-  const affectedDates: string[] = [];
-  const dateEntriesBefore: Record<string, [string, string][]> = {};
-  const writtenPriKeys: string[] = [];
-
-  for (const date of immersionDates) {
-    const dateRaw = await browser.storage.local.get(date);
-    const entries: [string, string][] = Array.isArray(dateRaw[date])
-      ? dateRaw[date]
-      : [];
-
-    let dateHasAnySecondary = false;
-    for (const sUuid of validSecondaries) {
-      const hasSec = entries.some(([, u]) => u === sUuid);
-      const secClients = new Set<string>();
-      for (const [c, u] of entries) {
-        if (u === sUuid && c) secClients.add(c);
-      }
-      if (defaultClient) secClients.add(defaultClient);
-
-      const secKeys = Array.from(secClients).map((c) =>
-        JSON.stringify([c, sUuid, date]),
-      );
-      const secRaw = await browser.storage.local.get(secKeys);
-      for (const k of secKeys) {
-        if (secRaw[k] && Object.keys(secRaw[k]).length > 0) {
-          secStatsMap[sUuid][k] = secRaw[k];
-          dateHasAnySecondary = true;
-        }
-      }
-      if (hasSec) dateHasAnySecondary = true;
-    }
-
-    if (!dateHasAnySecondary) continue;
-
-    affectedDates.push(date);
-    dateEntriesBefore[date] = [...entries];
-
-    // Gather primary stats on this date before merge
-    const priClients = new Set<string>();
-    for (const [c, u] of entries) {
-      if (u === primaryUuid && c) priClients.add(c);
-    }
-    if (defaultClient) priClients.add(defaultClient);
-
-    const priKeys = Array.from(priClients).map((c) =>
-      JSON.stringify([c, primaryUuid, date]),
-    );
-    const priRaw = await browser.storage.local.get(priKeys);
-    for (const k of priKeys) {
-      if (priRaw[k] && Object.keys(priRaw[k]).length > 0) {
-        primaryStatsBefore[k] = priRaw[k];
-      }
-    }
-  }
-
-  // 1. Merge daily stats: sum all secondaries into primary
-  for (const date of affectedDates) {
-    const origEntries = dateEntriesBefore[date] ?? [];
-
-    const chosenPriClient =
-      origEntries.find(([, u]) => u === primaryUuid)?.[0] ??
-      origEntries.find(([, u]) => validSecondaries.includes(u))?.[0] ??
-      defaultClient;
-
-    const targetPriKey = JSON.stringify([chosenPriClient, primaryUuid, date]);
-    writtenPriKeys.push(targetPriKey);
-
-    const combinedStats: Record<string, number> = {};
-
-    // Sum primary stats before
-    for (const [k, stat] of Object.entries(primaryStatsBefore)) {
-      try {
-        const [, u, d] = JSON.parse(k);
-        if (u === primaryUuid && d === date && stat) {
-          for (const [prop, val] of Object.entries(stat)) {
-            if (typeof val === "number") {
-              combinedStats[prop] = (combinedStats[prop] ?? 0) + val;
-            }
-          }
-        }
-      } catch {}
-    }
-
-    // Sum secondary stats
-    for (const sUuid of validSecondaries) {
-      for (const [k, stat] of Object.entries(secStatsMap[sUuid])) {
-        try {
-          const [, u, d] = JSON.parse(k);
-          if (u === sUuid && d === date && stat) {
-            for (const [prop, val] of Object.entries(stat)) {
-              if (typeof val === "number") {
-                combinedStats[prop] = (combinedStats[prop] ?? 0) + val;
-              }
-            }
-          }
-        } catch {}
-      }
-    }
-
-    if (combinedStats.time_read && combinedStats.chars_read) {
-      combinedStats.read_speed =
-        (combinedStats.chars_read / combinedStats.time_read) * 3600;
-    }
-
-    await browser.storage.local.set({ [targetPriKey]: combinedStats });
-
-    // Clean up secondary stat keys and duplicate primary keys for this date
-    const keysToRemove: string[] = [];
-    for (const sUuid of validSecondaries) {
-      for (const k of Object.keys(secStatsMap[sUuid])) {
-        try {
-          const [, u, d] = JSON.parse(k);
-          if (u === sUuid && d === date) keysToRemove.push(k);
-        } catch {}
-      }
-    }
-    for (const k of Object.keys(primaryStatsBefore)) {
-      try {
-        const [, u, d] = JSON.parse(k);
-        if (u === primaryUuid && d === date && k !== targetPriKey) {
-          keysToRemove.push(k);
-        }
-      } catch {}
-    }
-    await safeRemove(keysToRemove);
-
-    // Update date array entries: remove all secondaries, keep chosen primary
-    let newEntries = origEntries.filter(([, u]) => !validSecondaries.includes(u));
-    newEntries = newEntries.filter(
-      ([c, u]) => u !== primaryUuid || c === chosenPriClient,
-    );
-    if (!newEntries.some(([c, u]) => c === chosenPriClient && u === primaryUuid)) {
-      newEntries.push([chosenPriClient, primaryUuid]);
-    }
-    await browser.storage.local.set({ [date]: newEntries });
-  }
-
-  // 2. Move lines from all secondaries to primary (safely chunked)
-  let nextLineId: number = (priDetails.last_line_added ?? -1) + 1;
-  const primaryLastLineId = priDetails.last_line_added ?? -1;
-  const secLineIdMaps: Record<string, [number, number][]> = {};
-
-  for (const sUuid of validSecondaries) {
-    secLineIdMaps[sUuid] = [];
-    const secDetails = secDetailsMap[sUuid];
-    let secLastLine: number = secDetails?.last_line_added ?? -1;
-
-    if (secLastLine < 0) {
-      const probe = await browser.storage.local.get(JSON.stringify([sUuid, 0]));
-      if (probe[JSON.stringify([sUuid, 0])] !== undefined) {
-        let probeIdx = 0;
-        while (true) {
-          const batchKeys = [...Array(50).keys()].map((i) =>
-            JSON.stringify([sUuid, probeIdx + i]),
-          );
-          const batch = await browser.storage.local.get(batchKeys);
-          let foundAny = false;
-          for (let i = 0; i < 50; i++) {
-            if (batch[JSON.stringify([sUuid, probeIdx + i])] !== undefined) {
-              secLastLine = probeIdx + i;
-              foundAny = true;
-            }
-          }
-          if (!foundAny) break;
-          probeIdx += 50;
-        }
-      }
-    }
-
-    if (secLastLine >= 0) {
-      const chunkSize = 200;
-      for (let start = 0; start <= secLastLine; start += chunkSize) {
-        const end = Math.min(start + chunkSize - 1, secLastLine);
-        const secLineKeys: string[] = [];
-        for (let i = start; i <= end; i++) {
-          secLineKeys.push(JSON.stringify([sUuid, i]));
-        }
-        const secLines = await batchGet(secLineKeys);
-
-        const newLines: Record<string, unknown> = {};
-        const oldKeys: string[] = [];
-        for (const [oldKey, lineData] of Object.entries(secLines)) {
-          if (lineData === undefined || lineData === null) continue;
-          const origSecId: number = JSON.parse(oldKey)[1];
-          secLineIdMaps[sUuid].push([nextLineId, origSecId]);
-          newLines[JSON.stringify([primaryUuid, nextLineId])] = lineData;
-          oldKeys.push(oldKey);
-          nextLineId++;
-        }
-
-        if (Object.keys(newLines).length > 0) await batchSet(newLines);
-        await safeRemove(oldKeys);
-      }
-    }
-  }
-
-  // Update primary details & preserve metadata from secondaries
-  priDetails.last_line_added = nextLineId - 1;
-  for (const sUuid of validSecondaries) {
-    const sDetails = secDetailsMap[sUuid];
-    if (!priDetails.vndb_id && sDetails?.vndb_id) priDetails.vndb_id = sDetails.vndb_id;
-    if (!priDetails.type && sDetails?.type) priDetails.type = sDetails.type;
-  }
-  await browser.storage.local.set({ [primaryUuid]: priDetails });
-
-  // 3. Update media map to redirect secondary identifiers to primary
-  const secMediaUpdates: Record<string, Record<string, string>> = {};
-  for (const sUuid of validSecondaries) secMediaUpdates[sUuid] = {};
-
-  const mediaRaw = await browser.storage.local.get("media");
-  if (mediaRaw.hasOwnProperty("media") && mediaRaw["media"]) {
-    const mediaMap: Record<string, string> = mediaRaw["media"];
-    let changed = false;
-    for (const [mediaKey, mappedUuid] of Object.entries(mediaMap)) {
-      if (validSecondaries.includes(mappedUuid)) {
-        secMediaUpdates[mappedUuid][mediaKey] = mappedUuid;
-        mediaMap[mediaKey] = primaryUuid;
-        changed = true;
-      }
-    }
-    if (changed) {
-      await browser.storage.local.set({ media: mediaMap });
-    }
-  }
-
-  // 4. Update type properties if previous_uuid points to any secondary
-  for (const type of ["vn", "mokuro", "ttu", "manual"]) {
-    const typeRaw = await browser.storage.local.get(type);
-    if (typeRaw[type] && validSecondaries.includes(typeRaw[type].previous_uuid)) {
-      typeRaw[type].previous_uuid = primaryUuid;
-      await browser.storage.local.set({ [type]: typeRaw[type] });
-    }
-  }
-
-  // 5. Delete secondary instance details
-  await safeRemove(validSecondaries);
-
-  // 6. Save atomic snapshot to merge_history (keep last 20)
-  const secondaries: SecondaryMergeInfo[] = validSecondaries.map((sUuid) => ({
-    secondaryUuid: sUuid,
-    secondaryName: secDetailsMap[sUuid]?.name ?? sUuid,
-    secondaryDetails: secDetailsMap[sUuid] ?? {},
-    secondaryStats: secStatsMap[sUuid] ?? {},
-    lineIdMap: secLineIdMaps[sUuid] ?? [],
-    mediaUpdates: secMediaUpdates[sUuid] ?? {},
-  }));
-
-  const snapshot: MergeSnapshot = {
-    timestamp: new Date().toISOString(),
-    primaryUuid,
-    primaryName: priDetails.name ?? primaryUuid,
-    primaryLastLineId,
-    primaryStatsBefore,
-    writtenPriKeys,
-    affectedDates,
-    dateEntriesBefore,
-    secondaries,
-    // Populate legacy single fields with first secondary for backwards compatibility:
-    secondaryUuid: secondaries[0]?.secondaryUuid,
-    secondaryName: secondaries[0]?.secondaryName,
-    secondaryDetails: secondaries[0]?.secondaryDetails,
-    secondaryStats: secondaries[0]?.secondaryStats,
-    lineIdMap: secondaries[0]?.lineIdMap,
-    mediaUpdates: secondaries[0]?.mediaUpdates,
-  };
-
-  const histRaw = await browser.storage.local.get("merge_history");
-  const history: MergeSnapshot[] = histRaw["merge_history"] ?? [];
-  history.push(snapshot);
-  await browser.storage.local.set({
-    merge_history: history.slice(-20),
-  });
-}
-
-export async function mergeGames(
-  primaryUuid: string,
-  secondaryUuid: string,
-): Promise<void> {
-  return mergeGameGroup(primaryUuid, [secondaryUuid]);
-}
-
-/**
- * Fully reverses a merge using its saved snapshot.
- * Re-creates secondaries, restores pre-merge stats for all games,
- * moves lines back (chunked), and removes the snapshot from history.
- */
-export async function undoMerge(snapshot: MergeSnapshot): Promise<void> {
-  const clientData = await browser.storage.local.get("client");
-  const client: string = clientData["client"] ?? "";
-
-  const secondaries: SecondaryMergeInfo[] =
-    snapshot.secondaries && snapshot.secondaries.length > 0
-      ? snapshot.secondaries
-      : [
-          {
-            secondaryUuid: snapshot.secondaryUuid!,
-            secondaryName: snapshot.secondaryName ?? snapshot.secondaryUuid!,
-            secondaryDetails: snapshot.secondaryDetails ?? {},
-            secondaryStats: snapshot.secondaryStats ?? {},
-            lineIdMap: snapshot.lineIdMap ?? [],
-            mediaUpdates: snapshot.mediaUpdates ?? {},
-          },
-        ];
-
-  // 1. Restore all secondary instance details & secondary stats
-  for (const sec of secondaries) {
-    if (sec.secondaryUuid) {
-      await browser.storage.local.set({
-        [sec.secondaryUuid]: sec.secondaryDetails ?? {},
-      });
-      if (sec.secondaryStats && Object.keys(sec.secondaryStats).length > 0) {
-        await batchSet(sec.secondaryStats);
-      }
-    }
-  }
-
-  // 2. Restore primary stats
-  if (snapshot.writtenPriKeys && snapshot.writtenPriKeys.length > 0) {
-    await safeRemove(snapshot.writtenPriKeys);
-  } else {
-    // Fallback for older snapshots without writtenPriKeys
-    const fallbackPriKeysToRemove: string[] = [];
-    for (const date of snapshot.affectedDates ?? []) {
-      const priKey = JSON.stringify([client, snapshot.primaryUuid, date]);
-      if (snapshot.primaryStatsBefore?.[priKey] === undefined) {
-        fallbackPriKeysToRemove.push(priKey);
-      }
-    }
-    await safeRemove(fallbackPriKeysToRemove);
-  }
-
-  if (snapshot.primaryStatsBefore && Object.keys(snapshot.primaryStatsBefore).length > 0) {
-    await batchSet(snapshot.primaryStatsBefore);
-  }
-
-  // 3. Move lines back: delete from primary, re-create under secondary IDs (safely chunked)
-  for (const sec of secondaries) {
-    if (sec.lineIdMap && sec.lineIdMap.length > 0) {
-      const chunkSize = 200;
-      for (let i = 0; i < sec.lineIdMap.length; i += chunkSize) {
-        const chunk = sec.lineIdMap.slice(i, i + chunkSize);
-        const primaryLineKeys = chunk.map(([newPriId]) =>
-          JSON.stringify([snapshot.primaryUuid, newPriId]),
-        );
-        const primaryLines = await batchGet(primaryLineKeys);
-        const linesToDelete: string[] = [];
-        const linesToRestore: Record<string, unknown> = {};
-
-        for (const [newPriId, origSecId] of chunk) {
-          const priKey = JSON.stringify([snapshot.primaryUuid, newPriId]);
-          const lineData = primaryLines[priKey];
-          linesToDelete.push(priKey);
-          if (lineData !== undefined && lineData !== null) {
-            linesToRestore[JSON.stringify([sec.secondaryUuid, origSecId])] =
-              lineData;
-          }
-        }
-        await safeRemove(linesToDelete);
-        if (Object.keys(linesToRestore).length > 0) {
-          await batchSet(linesToRestore);
-        }
-      }
-    }
-  }
-
-  // 4. Restore primary's last_line_added
-  const priDetailsRaw = await browser.storage.local.get(snapshot.primaryUuid);
-  const priDetails = priDetailsRaw[snapshot.primaryUuid] ?? {};
-  priDetails.last_line_added = snapshot.primaryLastLineId;
-  await browser.storage.local.set({ [snapshot.primaryUuid]: priDetails });
-
-  // 5. Restore date arrays
-  if (snapshot.dateEntriesBefore) {
-    for (const [date, origEntries] of Object.entries(snapshot.dateEntriesBefore)) {
-      await browser.storage.local.set({ [date]: origEntries });
-    }
-  } else {
-    // Fallback for older snapshots
-    for (const date of snapshot.affectedDates ?? []) {
-      const dateRaw = await browser.storage.local.get(date);
-      let entries: [string, string][] = Array.isArray(dateRaw[date]) ? dateRaw[date] : [];
-      for (const sec of secondaries) {
-        if (!entries.some(([, u]) => u === sec.secondaryUuid)) {
-          entries.push([client, sec.secondaryUuid]);
-        }
-      }
-      const priWasThere =
-        snapshot.primaryStatsBefore?.[
-          JSON.stringify([client, snapshot.primaryUuid, date])
-        ] !== undefined;
-      if (!priWasThere) {
-        entries = entries.filter(([, u]) => u !== snapshot.primaryUuid);
-      }
-      if (entries.length > 0) {
-        await browser.storage.local.set({ [date]: entries });
-      } else {
-        await safeRemove(date);
-      }
-    }
-  }
-
-  // Ensure dates are in immersion_dates
-  const datesRaw = await browser.storage.local.get("immersion_dates");
-  const dates: string[] = Array.isArray(datesRaw["immersion_dates"])
-    ? datesRaw["immersion_dates"]
-    : [];
-  const missingDates = (snapshot.affectedDates ?? []).filter((d) => !dates.includes(d));
-  if (missingDates.length > 0) {
-    await browser.storage.local.set({ immersion_dates: [...dates, ...missingDates] });
-  }
-
-  // 6. Restore media map if it was changed
-  const mediaRaw = await browser.storage.local.get("media");
-  if (mediaRaw.hasOwnProperty("media") && mediaRaw["media"]) {
-    const mediaMap: Record<string, string> = mediaRaw["media"];
-    let changed = false;
-    for (const sec of secondaries) {
-      if (sec.mediaUpdates && Object.keys(sec.mediaUpdates).length > 0) {
-        for (const [mediaKey, origUuid] of Object.entries(sec.mediaUpdates)) {
-          mediaMap[mediaKey] = origUuid;
-          changed = true;
-        }
-      }
-    }
-    if (changed) {
-      await browser.storage.local.set({ media: mediaMap });
-    }
-  }
-
-  // 7. Remove snapshot from history
-  const histRaw = await browser.storage.local.get("merge_history");
-  const history: MergeSnapshot[] = Array.isArray(histRaw["merge_history"])
-    ? histRaw["merge_history"]
-    : [];
-  await browser.storage.local.set({
-    merge_history: history.filter((h) => h.timestamp !== snapshot.timestamp),
-  });
-}
-
-export async function getMergeHistory(): Promise<MergeSnapshot[]> {
-  const raw = await browser.storage.local.get("merge_history");
-  return (raw["merge_history"] ?? []).slice().reverse(); // newest first
-}
 
 
 // ------- Manual Stat Entry / Edit -------
@@ -1058,6 +522,7 @@ export async function repairDateStats(
   let chars_read = 0;
   let lines_read = 0;
   let skippedLines = 0;
+  const lineTimestamps: number[] = [];
 
   if (allLines) {
     for (const [, , lineText, time] of allLines) {
@@ -1069,15 +534,129 @@ export async function repairDateStats(
       if (lineDate !== date) continue;
       chars_read += charsInLine(lineText as string);
       lines_read += lineSplitCount(lineText as string);
+      lineTimestamps.push(Number(time));
     }
   }
 
   // Read existing stat so we can hand back the current time_read.
   const statKey = JSON.stringify([client, uuid, date]);
   const existing = await browser.storage.local.get(statKey);
-  const time_read: number = existing[statKey]?.time_read ?? 0;
+  let time_read: number = Math.max(0, Number(existing[statKey]?.time_read) || 0);
 
-  return { chars_read, lines_read, time_read, skippedLines };
+  // If time_read is 0 or negative and lines exist with timestamps, estimate time from timestamps
+  if (time_read <= 0 && lineTimestamps.length > 0) {
+    lineTimestamps.sort((a, b) => a - b);
+    let estimatedSecs = 0;
+    for (let i = 1; i < lineTimestamps.length; i++) {
+      const gapSec = (lineTimestamps[i] - lineTimestamps[i - 1]) / 1000;
+      if (gapSec > 0 && gapSec <= 120) {
+        estimatedSecs += gapSec;
+      } else {
+        estimatedSecs += 8;
+      }
+    }
+    estimatedSecs += 8; // base allowance for the first line
+    time_read = Math.round(estimatedSecs);
+  }
+
+  return {
+    chars_read: Math.max(0, chars_read),
+    lines_read: Math.max(0, lines_read),
+    time_read: Math.max(0, time_read),
+    skippedLines,
+  };
+}
+
+/**
+ * Scans all recorded immersion dates in storage. If any entry has negative numbers
+ * (chars_read < 0, time_read < 0, or lines_read < 0), it automatically recalculates
+ * ground-truth stats from stored lines and writes the non-negative repaired values to storage.
+ */
+export async function scanAndRepairAllNegativeStats(): Promise<{
+  repairedCount: number;
+  repairedDates: string[];
+}> {
+  const datesRaw = await browser.storage.local.get("immersion_dates");
+  const dates: string[] = Array.isArray(datesRaw["immersion_dates"])
+    ? datesRaw["immersion_dates"].filter(
+        (d: unknown) => typeof d === "string" && d.trim().length > 0,
+      )
+    : [];
+
+  if (dates.length === 0) return { repairedCount: 0, repairedDates: [] };
+
+  // 1. Batch fetch all date entries
+  const dateEntriesMap = await browser.storage.local.get(dates);
+
+  // 2. Collect all stat keys to query
+  const statKeyToMeta: Record<
+    string,
+    { client: string; uuid: string; date: string }
+  > = {};
+  for (const date of dates) {
+    const entries = dateEntriesMap[date];
+    if (Array.isArray(entries)) {
+      for (const [c, u] of entries) {
+        const k = JSON.stringify([c, u, date]);
+        statKeyToMeta[k] = { client: c, uuid: u, date };
+      }
+    }
+  }
+
+  const allStatKeys = Object.keys(statKeyToMeta);
+  if (allStatKeys.length === 0) return { repairedCount: 0, repairedDates: [] };
+
+  // 3. Batch fetch all stats in one storage read
+  const statsMap = await browser.storage.local.get(allStatKeys);
+
+  const toRepair: {
+    uuid: string;
+    date: string;
+    statKey: string;
+    currentStat: Record<string, number>;
+  }[] = [];
+
+  for (const [k, meta] of Object.entries(statKeyToMeta)) {
+    const stat = statsMap[k];
+    if (stat && typeof stat === "object") {
+      const chars = Number(stat.chars_read) || 0;
+      const time = Number(stat.time_read) || 0;
+      const lines = Number(stat.lines_read) || 0;
+      if (chars < 0 || time < 0 || lines < 0) {
+        toRepair.push({
+          uuid: meta.uuid,
+          date: meta.date,
+          statKey: k,
+          currentStat: stat,
+        });
+      }
+    }
+  }
+
+  if (toRepair.length === 0) return { repairedCount: 0, repairedDates: [] };
+
+  const repairedDates: string[] = [];
+  const writes: Record<string, Record<string, number>> = {};
+
+  for (const item of toRepair) {
+    const rep = await repairDateStats(item.uuid, item.date);
+    const fixedStat: Record<string, number> = {
+      ...item.currentStat,
+      chars_read: Math.max(0, rep.chars_read),
+      lines_read: Math.max(0, rep.lines_read),
+      time_read: Math.max(0, rep.time_read),
+    };
+    writes[item.statKey] = fixedStat;
+    repairedDates.push(item.date);
+    console.info(
+      `exSTATic: Auto-recalculated negative stats for ${item.uuid} on ${item.date}:`,
+      fixedStat,
+    );
+  }
+
+  await browser.storage.local.set(writes);
+
+  return { repairedCount: toRepair.length, repairedDates };
 }
 
 /**

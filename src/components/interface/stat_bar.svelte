@@ -79,6 +79,7 @@
     active = false;
     calculateStats();
   });
+  document.addEventListener("stats_tick", calculateStats);
 </script>
 
 <div

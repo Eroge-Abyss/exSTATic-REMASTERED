@@ -77,7 +77,7 @@ export class MokuroStorage extends MediaStorage<MokuroDetails> {
 
     if (page_num > this.details!.last_page_read) {
       await this.instance_storage?.addDailyStats(date, stats);
-      this.start_ticker(false);
+      this.start_ticker();
     } else if (page_num < this.details!.last_page_read) {
       await this.instance_storage?.subDailyStats(date, stats);
       this.stop_ticker();

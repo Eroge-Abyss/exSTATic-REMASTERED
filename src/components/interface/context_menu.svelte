@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, type Snippet } from "svelte";
-  import { fade, scale } from "svelte/transition";
+  import { scale } from "svelte/transition";
 
   interface Props {
     show: boolean;
